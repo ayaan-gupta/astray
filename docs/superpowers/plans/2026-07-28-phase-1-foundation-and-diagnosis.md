@@ -541,6 +541,17 @@ This is the load-bearing task. The retry-with-error-feedback loop is what substi
   - `async complete_text(*, messages: list[dict], model: str, thinking: bool = True) -> tuple[str, LlmCallMeta]`
   - `class LlmError(Exception)`, `class SchemaRetryExhausted(LlmError)`
 
+**Error contract for every later caller:** all four failure modes raise `LlmError` or a
+subclass — never a bare `KeyError`, `IndexError`, or `AttributeError`. That covers a non-2xx
+status, a transport error (`httpx.ConnectError`, `httpx.TimeoutException`), a non-2xx body that
+is valid JSON but not a dict, and a 200 whose `choices` is missing, empty, or malformed. A
+private `_message(body)` helper enforces the response shape at every call site. Note the
+asymmetry: a *protocol* failure (bad response shape) raises immediately and is NOT retried,
+because retrying cannot fix it; only a *content* failure (`ValueError`/`ValidationError` from
+parsing or schema validation) enters the retry loop with the error text fed back to the model.
+So `except LlmError` is sufficient for callers, and catching `SchemaRetryExhausted` separately
+distinguishes "the model could not produce valid output" from "the API misbehaved".
+
 - [ ] **Step 1: Write the failing test**
 
 Create `tests/test_deepseek.py`:
