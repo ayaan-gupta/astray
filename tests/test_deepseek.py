@@ -202,6 +202,44 @@ async def test_raises_after_retries_exhausted():
         )
 
 
+async def test_constructor_max_retries_is_the_default_when_call_does_not_override():
+    """Settings.llm_max_retries (server/config.py) must actually change
+    complete_json's retry budget when a caller (like s1_diagnose.diagnose)
+    doesn't pass its own max_retries -- it used to be dead config, since
+    complete_json hard-coded max_retries=2 regardless. The client's own
+    constructed max_retries is now that default."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_reply("not json at all"))
+
+    client = DeepSeekClient("sk-test", transport=httpx.MockTransport(handler), max_retries=0)
+    with pytest.raises(SchemaRetryExhausted):
+        await client.complete_json(
+            messages=[{"role": "user", "content": "go"}], schema=Answer, model="deepseek-v4-flash"
+        )
+    assert calls["n"] == 1  # max_retries=0 means exactly one attempt, no retries
+
+
+async def test_per_call_max_retries_still_overrides_the_constructor_default():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_reply("not json at all"))
+
+    client = DeepSeekClient("sk-test", transport=httpx.MockTransport(handler), max_retries=5)
+    with pytest.raises(SchemaRetryExhausted):
+        await client.complete_json(
+            messages=[{"role": "user", "content": "go"}],
+            schema=Answer,
+            model="deepseek-v4-flash",
+            max_retries=0,
+        )
+    assert calls["n"] == 1
+
+
 async def test_strict_mode_disables_thinking_and_forces_tool_call():
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)

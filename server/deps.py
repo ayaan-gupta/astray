@@ -13,6 +13,7 @@ def build_llm_client(settings: Settings) -> DeepSeekClient:
         base_url=settings.deepseek_base_url,
         transport=transport,
         timeout_s=settings.llm_timeout_s,
+        max_retries=settings.llm_max_retries,
     )
 
 

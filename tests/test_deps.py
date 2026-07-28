@@ -31,3 +31,20 @@ def test_build_llm_client_does_not_raise_when_fake_llm_enabled():
     settings = _settings(fake_llm=True)
     client = build_llm_client(settings)
     assert client is not None
+
+
+def test_build_llm_client_wires_max_retries_from_settings():
+    """Settings.llm_max_retries used to be dead config: complete_json hard-coded
+    max_retries=2 and nothing read the setting, so configuring it in .env silently
+    did nothing. build_llm_client must now pass it through to DeepSeekClient's
+    constructor, which is what makes it take effect (see test_deepseek.py for the
+    end-to-end proof that the constructor value actually changes retry behavior)."""
+    settings = _settings(llm_max_retries=5)
+    client = build_llm_client(settings)
+    assert client._max_retries == 5
+
+
+def test_build_llm_client_default_max_retries_matches_settings_default():
+    settings = _settings()
+    client = build_llm_client(settings)
+    assert client._max_retries == settings.llm_max_retries == 2

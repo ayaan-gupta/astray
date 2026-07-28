@@ -82,6 +82,7 @@ class DeepSeekClient:
         base_url: str = "https://api.deepseek.com",
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_s: int = 240,
+        max_retries: int = 2,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url,
@@ -92,6 +93,12 @@ class DeepSeekClient:
                 "Content-Type": "application/json",
             },
         )
+        # complete_json's own default schema-retry budget when a call doesn't pass its
+        # own max_retries -- this is what makes Settings.llm_max_retries (server/config.py)
+        # actually take effect, via server/deps.py's build_llm_client construction. A
+        # per-call max_retries argument still overrides this for the rare caller that
+        # needs a different budget than the configured default.
+        self._max_retries = max_retries
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -173,8 +180,14 @@ class DeepSeekClient:
         schema: type[T],
         model: str,
         thinking: bool = True,
-        max_retries: int = 2,
+        max_retries: int | None = None,
     ) -> tuple[T, LlmCallMeta]:
+        """``max_retries=None`` (the default) uses this client's configured
+        ``max_retries`` (``Settings.llm_max_retries`` via ``build_llm_client``) --
+        pass an explicit value only to override that default for this one call.
+        """
+        if max_retries is None:
+            max_retries = self._max_retries
         convo = [*messages, {"role": "user", "content": _schema_instruction(schema)}]
         last_error = "unknown"
 
