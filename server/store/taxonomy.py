@@ -66,18 +66,10 @@ def canonicalize_rule(rule: str) -> str:
     return text
 
 
-def _slug_candidate(text: str) -> tuple[str, bool]:
-    """Slugify ``text`` (lowercase, non-alnum runs to ``-``, capped at 64 chars)
-    and report whether the result was truncated.
-
-    ``was_truncated`` is True when the raw slug exceeded 64 characters and had
-    to be cut — the signal ``_resolve_slug_for_mint`` uses to decide whether an
-    exact slug match is trustworthy on its own or needs corroboration.
-    """
+def _slugify(text: str) -> str:
+    """Lowercase, collapse runs of non-alphanumerics to a single ``-``, cap at 64 chars."""
     raw = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
-    if not raw:
-        return "unnamed-misconception", False
-    return raw[:64], len(raw) > 64
+    return raw[:64] or "unnamed-misconception"
 
 
 def _is_slug_unique_violation(exc: sqlite3.IntegrityError) -> bool:
@@ -100,18 +92,28 @@ def _resolve_slug_for_mint(
     misconception about to be minted from ``source_text`` — an LLM-proposed
     ``new_slug`` or, on fallback, the raw ``buggy_rule``.
 
-    ``_slug_candidate`` truncates to 64 characters. An *untruncated* exact slug match
-    is trusted outright: two short, human/LLM-composed names agreeing in full
-    is strong evidence of real identity, and this is exactly the mechanism
-    ``test_duplicate_slug_reuses_existing_row`` relies on (the model naming an
-    existing curated slug on purpose). A *truncated* match is much weaker
-    evidence — it only proves the first 64 characters agree, and two
-    genuinely different long buggy rules can share that prefix and diverge
-    after it. So a truncated match is corroborated against ``canonical_rule``
-    before being trusted; on mismatch, a fresh, disambiguated slug is minted
-    instead of silently merging two distinct misconceptions into one row.
+    Any slug match found is corroborated against ``canonical_rule`` before
+    being trusted: if the existing row's canonical_rule equals the new
+    diagnosis's own, it really is the same misconception and is reused —
+    regardless of *how* the slug came to collide. If it differs, the
+    collision is between two distinct misconceptions and a fresh,
+    disambiguated slug is minted instead of silently merging them into one
+    row.
+
+    A slug can collide for more than one reason, and truncation is only one
+    of them: ``_slugify`` caps at 64 characters, so two long rules sharing a
+    64-char prefix collide there; but ``_slugify`` also collapses any run of
+    non-alphanumerics to a single ``-``, so short rules differing only in an
+    operator collide too — ``"x + y"`` and ``"x - y"`` both slugify to
+    ``"x-y"`` with no truncation anywhere near the 64-char cap, yet
+    canonicalize to ``v+v`` and ``v-v``. An earlier version of this function
+    only corroborated a *truncated* match, on the theory that an untruncated
+    match was always the model deliberately naming an existing slug on
+    purpose. That was wrong: the operator case above is an untruncated
+    collision between genuinely distinct rules. The corroboration check now
+    applies unconditionally, regardless of whether truncation occurred.
     """
-    base_slug, truncated = _slug_candidate(source_text)
+    base_slug = _slugify(source_text)
 
     slug = base_slug
     suffix = 2
@@ -121,10 +123,11 @@ def _resolve_slug_for_mint(
         ).fetchone()
         if row is None:
             return slug, None
-        if not truncated or row["canonical_rule"] == canonical:
+        if row["canonical_rule"] == canonical:
             return slug, int(row["id"])
-        # Spurious truncation collision: a different misconception happened to
-        # truncate to the same 64 characters. Disambiguate rather than reuse.
+        # Slug collision between two distinct misconceptions (truncation,
+        # operator/punctuation normalization, or any other cause). Disambiguate
+        # rather than reuse.
         slug = f"{base_slug[:60]}-{suffix}"
         suffix += 1
 

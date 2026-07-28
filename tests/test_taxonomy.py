@@ -198,6 +198,53 @@ async def test_slug_truncation_collision_mints_distinct_rows(tmp_path):
     assert row1["canonical_rule"] != row2["canonical_rule"]
 
 
+async def test_operator_only_slug_collision_mints_distinct_rows(tmp_path):
+    """Truncation is not the only way a slug collision happens: slugifying
+    collapses any run of non-alphanumerics to a single '-', so two short
+    rules differing only in an operator produce an identical slug with no
+    truncation anywhere near the 64-char cap. "x + y" and "x - y" both
+    slugify to "x-y" while canonicalizing to "v+v" and "v-v" respectively.
+    Driving both through the fallback mint (the same path the reviewer's
+    repro used, where both calls returned the same id) must not silently
+    merge them into one row.
+    """
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": "service unavailable"}})
+
+    rule1 = "x + y"
+    rule2 = "x - y"
+    assert taxonomy._slugify(rule1) == taxonomy._slugify(rule2) == "x-y"
+
+    client1 = DeepSeekClient("sk-test", transport=httpx.MockTransport(handler))
+    got1 = await taxonomy.resolve_misconception(
+        conn,
+        client1,
+        diagnosis=_diagnosis(rule1, topic="algebra.operators"),
+        model="deepseek-v4-flash",
+    )
+    client2 = DeepSeekClient("sk-test", transport=httpx.MockTransport(handler))
+    got2 = await taxonomy.resolve_misconception(
+        conn,
+        client2,
+        diagnosis=_diagnosis(rule2, topic="algebra.operators"),
+        model="deepseek-v4-flash",
+    )
+
+    assert got1 != got2, "operator-only slug collision must not merge distinct misconceptions"
+    row1 = conn.execute(
+        "SELECT slug, canonical_rule FROM misconceptions WHERE id = ?", (got1,)
+    ).fetchone()
+    row2 = conn.execute(
+        "SELECT slug, canonical_rule FROM misconceptions WHERE id = ?", (got2,)
+    ).fetchone()
+    assert row1["slug"] != row2["slug"]
+    assert row1["canonical_rule"] == taxonomy.canonicalize_rule(rule1) == "v+v"
+    assert row2["canonical_rule"] == taxonomy.canonicalize_rule(rule2) == "v-v"
+
+
 async def test_llm_error_fallback_mints_from_raw_rule_and_logs(tmp_path, caplog):
     """The `except LlmError` branch in resolve_misconception (mint from the
     raw rule when the model call itself fails) had no coverage — this is
