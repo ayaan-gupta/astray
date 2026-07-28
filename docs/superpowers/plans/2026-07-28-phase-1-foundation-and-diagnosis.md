@@ -22,7 +22,14 @@ Every task's requirements implicitly include this section.
 - **No test may make a network call.** All HTTP is injected via `httpx.MockTransport`.
 - Secrets live only in `server/.env` (gitignored). Never logged, never in artifacts, never returned by the API.
 - Cache-friendly prompting: the shared preamble goes FIRST in every message list (cache hits are ~50× cheaper).
-- Student-supplied text is untrusted. It MUST be wrapped in labeled delimiters in every prompt.
+- Student-supplied text is untrusted. It MUST be wrapped in labeled delimiters in every prompt —
+  **and the delimiters MUST be per-request nonces**, not fixed literals. A fixed marker is
+  forgeable: a student step containing `<<<END_STUDENT_INPUT>>>` closes the block early and can
+  reopen it, placing an injected instruction outside what the model parses as student data. This
+  was demonstrated, not theorized. Generate an unpredictable token per call, keep the preamble's
+  instruction text byte-identical so prefix caching still hits (put the nonce in the user message),
+  and neutralize marker-like sequences in student content as a second layer. Never neutralize by
+  deleting content — preserving the student's work verbatim is the product.
 - **SymPy's `parse_expr` calls Python's `eval`.** This was not theoretical: running the original
   Task 7 sample code, `__import__('os').system(...)` executed for real and
   `().__class__.__bases__[0]` returned `<class 'object'>`. The strings reaching it come from a
