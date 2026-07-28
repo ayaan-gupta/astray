@@ -81,6 +81,20 @@ def _token_overlap(a: str, b: str) -> float:
     tokens (``"2ab missing"``, ``"product of derivatives"``, ``"quotient of derivatives"``)
     -- their substring check (``alias.lower() in got.lower()``), their primary match path,
     is untouched.
+
+    Known, open residual (not fixed by this guard): any alias with 3+ discriminative
+    tokens is still vulnerable to the identical disclaiming-attack shape, because this
+    formula only measures how much of the *reference* string (``a``) is covered by
+    ``got`` (``b``), never the reverse. A symmetric fix (also requiring the shared tokens
+    to be a meaningful fraction of ``b``) was attempted and measured against the alias
+    ``"zero product property applied to nonzero"``: a genuine paraphrase scored 0.105,
+    while a disclaiming attack quoting the same phrase scored 0.263 -- the attack
+    *outscores* the legitimate match, so no threshold on any symmetric statistic (tried:
+    this one, Jaccard, Dice) can separate them for this case. Deliberately left
+    unfixed rather than shipping a threshold fitted to pass the test suite; pinned as a
+    strict ``xfail`` in ``tests/test_eval_harness.py``
+    (``test_alias_ratio_path_residual_still_accepts_a_disclaiming_attack``) and detailed
+    in the Task 14 report's "Fix round 2" section.
     """
     ta = {t for t in a.lower().replace("->", " ").split() if len(t) > 2}
     tb = {t for t in b.lower().replace("->", " ").split() if len(t) > 2}

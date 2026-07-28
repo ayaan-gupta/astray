@@ -147,6 +147,95 @@ def test_new_alias_matches_zero_product_misuse_paraphrase():
     assert score_case(case, _diagnosis(got)).rule_match is True
 
 
+# --- Fix round 2, reviewer Critical finding (residual): the same disclaiming attack the
+# expected_rule route was fixed against in round 1 still works through the alias ratio
+# path for any alias with >=3 discriminative tokens -- round 1's guard only zeroed the
+# ratio for aliases at or below that floor (2-token aliases like "product of derivatives").
+#
+# The reviewer asked for the root-cause fix: make _token_overlap symmetric, requiring the
+# shared tokens to be a meaningful fraction of the *got* text too, not just of the
+# reference string. I implemented and measured this (min(shared/len(ta), shared/len(tb)))
+# against every currently-required legitimate ratio match and against reconstructed
+# disclaiming attacks on the same aliases. Result: not just "hard to threshold" but
+# provably non-separable for at least one existing case --
+#
+#   alias "zero product property applied to nonzero" (5 tokens):
+#     legitimate paraphrase -> symmetric score 0.105
+#     disclaiming attack    -> symmetric score 0.263   (the ATTACK outscores the legitimate
+#                                                        match -- an inversion, not just an
+#                                                        overlapping range)
+#
+# A real pytest run against the symmetric formula confirmed this: it broke
+# test_token_overlap_still_matches_a_legitimate_paraphrase (sqrt-of-sum) and
+# test_new_alias_matches_zero_product_misuse_paraphrase (both above) while still not
+# rejecting the reconstructed alias attack. No threshold value can fix an inversion --
+# per the reviewer's own instruction ("if a symmetric ratio can't satisfy both, tell me
+# what you measured rather than tuning the threshold"), _token_overlap is UNCHANGED from
+# round 1 (still the asymmetric min(len(ta),len(tb)) denominator, still guarded by
+# _MIN_DISCRIMINATIVE_TOKENS). See "Fix round 2" in the task report for the full
+# measurement across more formulas (Jaccard, Dice) -- all showed the same non-separability
+# on this route. The three tests below pin exactly what does and doesn't hold today:
+# the ratio path still legitimately matches (unchanged, still needed), the *short*-alias
+# half of the guard still rejects an attack that avoids literal substring, and the
+# >=3-token-alias exploit is captured as a strict xfail -- a known, open residual, not a
+# silently accepted one -- so it fails loudly the moment anyone actually closes it (a
+# future fix should remove the xfail marker, not leave it stacked on top of a real fix).
+
+
+def test_alias_ratio_path_matches_a_legitimate_paraphrase():
+    # Deliberately avoids every literal accept_aliases substring, so this can only pass
+    # through the ratio fallback, not the substring check -- isolates the same mechanism
+    # test_token_overlap_still_matches_a_legitimate_paraphrase isolates for expected_rule.
+    case = next(c for c in load_cases(CASES) if c.id == "zero-product-misuse")
+    got = (
+        "the shortcut of setting a factor equal to the constant only works when the "
+        "product is actually zero"
+    )
+    assert not any(alias.lower() in got.lower() for alias in case.accept_aliases)
+    score = score_case(case, _diagnosis(got))
+    assert score.rule_match is True
+    assert score.notes == "alias"
+
+
+def test_alias_ratio_path_rejects_unrelated_diagnosis_for_short_alias():
+    # product-rule's only alias, "product of derivatives", is 2 discriminative tokens --
+    # at or below the guard's floor, so its ratio fallback is always 0.0. This diagnosis
+    # avoids the literal substring "product of derivatives" (it says "derivatives
+    # multiplied as a product" instead) while disclaiming the real misconception, so a
+    # match here could only come from the ratio path the guard is supposed to zero out.
+    case = next(c for c in load_cases(CASES) if c.id == "product-rule")
+    got = (
+        "This mistake has nothing to do with derivatives multiplied as a product -- the "
+        "actual issue is an unrelated sign error copying down the final answer"
+    )
+    assert "product of derivatives" not in got.lower()
+    score = score_case(case, _diagnosis(got))
+    assert score.rule_match is False
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known, open residual (Fix round 2): the alias ratio path still accepts a "
+        "disclaiming diagnosis for any alias with >=3 discriminative tokens. Measured "
+        "non-separable from the legitimate match even with a symmetric forward/reverse "
+        "ratio (the attack scores 0.263 vs the legitimate match's 0.105 against this same "
+        "alias -- an inversion, not a threshold problem). strict=True so this flips to a "
+        "hard failure -- not a silent pass -- the moment a real fix lands; remove this "
+        "marker then, don't leave it stacked on top of the fix."
+    ),
+)
+def test_alias_ratio_path_residual_still_accepts_a_disclaiming_attack():
+    case = next(c for c in load_cases(CASES) if c.id == "zero-product-misuse")
+    got = (
+        "This is an unrelated transcription mistake -- the photo was blurry and misread "
+        "a digit, nothing to do with the zero product property being applied to a "
+        "nonzero product"
+    )
+    score = score_case(case, _diagnosis(got))
+    assert score.rule_match is False
+
+
 # --- Fix round 1, reviewer Important finding 4: main()'s CLI behavior beyond the brief's
 # reference code (the FAKE_LLM refusal, the unknown-`--case`-id path, LlmError
 # catch-and-continue, and the `regressed:` summary line) had no tests of its own. All run
