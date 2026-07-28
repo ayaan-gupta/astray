@@ -3,9 +3,13 @@ import json
 import pytest
 from pydantic import BaseModel
 
-from server.charter.contracts import Diagnosis, Transcription
+from server.charter.contracts import Diagnosis, SympyCheck, Transcription
 from server.llm.deepseek import DeepSeekClient, LlmError
 from server.llm.fake import FIXTURES, fake_transport
+from server.store import taxonomy
+from server.store.db import connect
+from server.store.seed_taxonomy import seed
+from server.store.taxonomy import MatchDecision
 
 
 class Answer(BaseModel):
@@ -49,6 +53,50 @@ def test_fixtures_diagnosis_is_pydantic_clean():
     Diagnosis.model_validate(payload)
     # If extra="forbid" is violated, model_validate would raise. No fields added.
     assert len(Diagnosis.model_fields) == 12
+
+
+def test_fixtures_match_decision_is_valid():
+    """Validate that the MatchDecision fixture is properly formed."""
+    payload = json.loads(FIXTURES["MatchDecision"])
+    decision = MatchDecision.model_validate(payload)
+    assert decision.same_as_id is None
+    assert decision.new_slug == "offline-fake-new-misconception"
+
+
+async def test_novel_rule_resolves_via_fake_transport_not_the_outage_fallback(tmp_path):
+    """Before the MatchDecision fixture existed, FAKE_LLM=1 (or any caller driving
+    resolve_misconception through fake_transport(FIXTURES)) 500'd on the taxonomy
+    adjudication call for any buggy_rule that wasn't an exact canonical-rule match
+    against an already-seeded misconception -- fake_transport's own "no fixture
+    matched" 500, which complete_strict/DeepSeekClient surfaces as LlmError, which
+    resolve_misconception's own `except LlmError` then silently swallows into its
+    raw-buggy_rule fallback mint. That made offline mode quietly exercise the
+    taxonomy-outage path on every novel rule, with no visible failure. This drives
+    exactly that path (a buggy_rule with no seeded match) through the real
+    FIXTURES dict and asserts the adjudication call actually succeeded (meta is
+    not None) rather than silently falling back."""
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    client = DeepSeekClient("sk-fake", transport=fake_transport(FIXTURES))
+    diagnosis = Diagnosis(
+        correct_solution=["irrelevant"],
+        sympy_check=SympyCheck(kind="skip", skip_reason="n/a"),
+        buggy_rule="a genuinely novel rule no seed entry matches",
+        misconception_statement="something new",
+        confidence=0.9,
+        topic="a.brand.new.topic",
+    )
+    misconception_id, meta = await taxonomy.resolve_misconception(
+        conn, client, diagnosis=diagnosis, model="deepseek-v4-flash"
+    )
+    assert meta is not None, (
+        "a novel rule under FAKE_LLM must resolve via the MatchDecision fixture, "
+        "not silently fall back to the taxonomy-outage path"
+    )
+    row = conn.execute(
+        "SELECT slug FROM misconceptions WHERE id = ?", (misconception_id,)
+    ).fetchone()
+    assert row["slug"] == "offline-fake-new-misconception"
 
 
 async def test_diagnosis_through_complete_json_with_real_model():

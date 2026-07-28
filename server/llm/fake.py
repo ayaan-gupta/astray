@@ -26,7 +26,26 @@ FIXTURES: dict[str, str] = {
             "clarifying_question": None,
             "topic": "algebra.binomial_expansion",
         }
-    )
+    ),
+    # server/store/taxonomy.py's resolve_misconception() calls complete_strict with
+    # this schema for any buggy_rule that isn't an exact canonical-rule match against
+    # an already-seeded misconception. Without a fixture for it, FAKE_LLM=1 (and any
+    # test using FIXTURES directly) 500s on that call -- fake_transport's own
+    # "no fake fixture matched" fallback -- which complete_strict/DeepSeekClient
+    # surfaces as LlmError, which resolve_misconception's `except LlmError` then
+    # silently swallows into its raw-buggy_rule fallback mint. That makes offline
+    # mode quietly exercise the taxonomy-outage fallback path on every novel rule
+    # instead of the real adjudication path, with no visible failure -- exactly the
+    # gap this fixture closes. `new_slug` (not `same_as_id`) so a novel rule mints a
+    # fresh row rather than claiming to match one of the ~20 seeded misconceptions
+    # that may or may not exist under this slug.
+    "MatchDecision": json.dumps(
+        {
+            "same_as_id": None,
+            "new_slug": "offline-fake-new-misconception",
+            "reasoning": "offline fake transport: no existing entry to match, minting new",
+        }
+    ),
 }
 
 
