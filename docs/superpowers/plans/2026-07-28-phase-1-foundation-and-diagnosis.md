@@ -296,7 +296,15 @@ Create empty `server/charter/__init__.py`. Create `server/charter/contracts.py`:
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+# Models parsed from raw LLM JSON set extra="forbid". Pydantic's default
+# ("ignore") would silently drop a hallucinated or misspelled key, yielding a
+# confident-looking diagnosis built on a default value. Forbidding extras turns
+# that into a ValidationError, which DeepSeekClient.complete_json feeds back to
+# the model as a self-correcting retry, and makes Pydantic emit
+# "additionalProperties": false into the schema injected into the prompt.
+# Models we construct ourselves (StudentSubmission, LlmCallMeta) keep the default.
 
 
 class StageName(StrEnum):
@@ -327,6 +335,8 @@ class LlmCallMeta(BaseModel):
 class Transcription(BaseModel):
     """Raw vision output. Must preserve the student's errors verbatim."""
 
+    model_config = ConfigDict(extra="forbid")
+
     problem: str
     steps: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
@@ -349,6 +359,8 @@ class SympyCheck(BaseModel):
     ``kind="skip"`` means the domain is not symbolically checkable.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: Literal["equivalence", "solution_set", "skip"]
     lhs: str | None = None
     rhs: str | None = None
@@ -359,6 +371,8 @@ class SympyCheck(BaseModel):
 
 
 class Diagnosis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     correct_solution: list[str]
     sympy_check: SympyCheck
     verified_by_sympy: bool = False
