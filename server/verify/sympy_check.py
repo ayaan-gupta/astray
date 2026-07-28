@@ -4,11 +4,12 @@ Covers algebraic manipulation, equation solving, and calculus. Word problems,
 proofs, and geometry are out of scope — those return verified=False with a
 reason, which lowers the diagnosis confidence ceiling rather than faking rigor.
 
-``run_check`` never raises. Every failure mode — malformed syntax, an
-unsupported check kind, a solver that can't find a finite answer, an input
-designed to be slow or unsafe — is folded into ``CheckResult(verified=False)``
-with a human-readable ``detail``. The caller (Task 11) treats "unverified" as
-"cap the confidence and hedge the UI," never as an error to propagate.
+``run_check`` never raises and never hangs. Every failure mode — malformed
+syntax, an unsupported check kind, a solver that can't find a finite answer,
+an input designed to be slow or unsafe — is folded into
+``CheckResult(verified=False)`` with a human-readable ``detail``. The caller
+(Task 11) treats "unverified" as "cap the confidence and hedge the UI," never
+as an error to propagate.
 
 Security note: ``sympy.parsing.sympy_parser.parse_expr`` evaluates the input
 through Python's ``eval`` under the hood. Handed a raw string it will run
@@ -20,10 +21,28 @@ we cannot assume they are merely "syntactically valid SymPy." Every string is
 passed through ``_validate_syntax`` first: it allow-lists a bare arithmetic/
 function-call character set (no quotes, no brackets, no LaTeX backslashes)
 and separately bans dunder names and attribute access, which closes the
-concrete escapes above before any parser code runs.
+concrete escapes above before any parser code runs. This character/attribute
+gate has been adversarially tested (unicode homoglyphs, hex escapes, RTL
+overrides, comment/newline smuggling, `lambda`/walrus, `globals()`/`vars()`,
+huge and deeply-nested inputs) and held.
+
+Hang note: the exponent-magnitude guard (``_MAX_EXPONENT``) is a cheap,
+*incomplete* fast-path, not the real defense. It inspects each ``Pow`` node's
+own literal exponent, so it catches ``2**10000000000`` but not a composed
+tower like ``2**2**2**2**2**2`` (every outer node's exponent is itself an
+unevaluated ``Pow``, not an ``Integer``, so the guard skips it) — and it does
+nothing at all for expensive non-``Pow`` calls like ``factorial(2000000)`` or
+``binomial``/``primorial``/``factorint`` of a large number. Expression-shape
+heuristics are whack-a-mole against a Turing-complete-ish surface (any sympy
+function is reachable through an allow-listed call). The real defense is
+``run_check`` executing the actual computation in a child process with a hard
+wall-clock timeout and killing it outright on expiry — see ``run_check`` and
+``_run_check_unbounded`` below.
 """
 
+import multiprocessing
 import re
+from multiprocessing.connection import Connection
 
 import sympy
 from pydantic import BaseModel
@@ -43,8 +62,18 @@ _TRANSFORMS = standard_transformations + (
 
 # Above this, a literal integer exponent (e.g. "2**10000000000") computes a
 # number with tens of millions of digits and can take the process down; a
-# real algebra/calculus problem never needs an exponent this large.
+# real algebra/calculus problem never needs an exponent this large. This is a
+# cheap fast-path only — it does not catch composed exponent towers or
+# expensive non-Pow functions (see module docstring); the wall-clock timeout
+# in run_check is the actual defense for those.
 _MAX_EXPONENT = 1000
+
+# Hard wall-clock ceiling on a single run_check call, enforced by running the
+# computation in a killable child process. Generous for any real algebra/
+# calculus/derivative check; anything that takes longer is either pathological
+# input or a sympy performance cliff we haven't characterized, and either way
+# "unverified, timed out" is the correct, safe answer.
+_DEFAULT_TIMEOUT_SECONDS = 5.0
 
 # Only plain arithmetic / function-call syntax is accepted: digits, letters,
 # underscore, whitespace, and the operators/punctuation algebra needs. No
@@ -133,16 +162,15 @@ def _is_zero(difference: sympy.Basic) -> bool:
     return bool(simplified.equals(0))
 
 
-def run_check(check: SympyCheck) -> CheckResult:
-    """Run the model's requested symbolic check. Never raises.
+def _run_check_unbounded(check: SympyCheck) -> CheckResult:
+    """The actual symbolic computation, with no time bound of its own.
 
-    A failure to verify — malformed syntax, an unsupported kind, a solver that
-    can't produce a finite comparable answer, hostile input — is a result,
-    not an exception: ``CheckResult(verified=False, detail=...)``.
+    Only ever called inside the child process spawned by ``run_check`` — that
+    process boundary, not anything in here, is what makes a runaway
+    computation (a composed exponent tower, an expensive number-theoretic
+    function, or some other sympy performance cliff neither of us has found
+    yet) terminate instead of hanging the caller forever.
     """
-    if check.kind == "skip":
-        return CheckResult(verified=False, detail=check.skip_reason or "not symbolically checkable")
-
     try:
         if check.kind == "equivalence":
             if not check.lhs or not check.rhs:
@@ -160,13 +188,27 @@ def run_check(check: SympyCheck) -> CheckResult:
                 return CheckResult(
                     verified=False, detail="solution_set needs equation and variable"
                 )
+            if not check.variable.isidentifier():
+                return CheckResult(
+                    verified=False, detail=f"{check.variable!r} is not a legal variable name"
+                )
             symbol = sympy.Symbol(check.variable)
             # Inject the declared variable so it resolves to *this* symbol even
             # if its name collides with a sympy builtin constant (I, E, S, ...).
             local_dict = {check.variable: symbol}
-            actual = sympy.solveset(
-                _parse(check.equation, local_dict=local_dict), symbol, domain=sympy.S.Reals
-            )
+            parsed_equation = _parse(check.equation, local_dict=local_dict)
+            if symbol not in parsed_equation.free_symbols:
+                # Catches e.g. variable="5x" (not even a legal name, so it can
+                # never appear in the equation) and variable="y" against an
+                # equation in x: without this, both sides can independently
+                # come out EmptySet (candidates=[] vs. a solver that can't
+                # relate an absent symbol to anything) and compare equal —
+                # a confidently "verified" answer that never checked anything.
+                return CheckResult(
+                    verified=False,
+                    detail=f"variable {check.variable!r} does not appear in the equation",
+                )
+            actual = sympy.solveset(parsed_equation, symbol, domain=sympy.S.Reals)
             claimed = sympy.FiniteSet(*[_parse(c, local_dict=local_dict) for c in check.candidates])
             # `actual.is_finite_set` (not `isinstance(actual, FiniteSet)`) is the
             # correct test: sympy's EmptySet is finite but is its own singleton
@@ -189,3 +231,85 @@ def run_check(check: SympyCheck) -> CheckResult:
         return CheckResult(verified=False, detail=detail)
 
     return CheckResult(verified=False, detail=f"unsupported check kind {check.kind!r}")
+
+
+def _worker(check_data: dict, conn: Connection) -> None:
+    """Entry point for the child process. Runs the unbounded check and sends
+    the result back over a Pipe (synchronous send — unlike a Queue, there's no
+    background feeder thread, so there's no race between the child exiting and
+    the data actually reaching the parent)."""
+    check = SympyCheck(**check_data)
+    result = _run_check_unbounded(check)
+    conn.send(result.model_dump())
+
+
+def run_check(check: SympyCheck, timeout: float = _DEFAULT_TIMEOUT_SECONDS) -> CheckResult:
+    """Run the model's requested symbolic check. Never raises. Never hangs.
+
+    A failure to verify — malformed syntax, an unsupported kind, a solver that
+    can't produce a finite comparable answer, hostile input, or a computation
+    that ran past ``timeout`` seconds — is a result, not an exception:
+    ``CheckResult(verified=False, detail=...)``.
+
+    The actual computation runs in a child process so a runaway can be killed
+    outright rather than blocking the caller's thread forever:
+
+    - Hard wall-clock limit: ``process.join(timeout)`` bounds the whole check
+      (parsing plus solving/simplifying), not each field parsed individually.
+    - Actually kills, doesn't orphan: on expiry we call ``process.kill()``
+      (SIGKILL) and reap it with ``process.join()``. A ``threading`` timeout
+      couldn't do this — Python cannot forcibly stop another thread, so a
+      runaway thread would keep burning a core after we "gave up" on it.
+    - Works off the main thread: ``multiprocessing.Process`` can be started
+      from any thread, unlike ``signal.alarm`` (main-thread-of-main-
+      interpreter only), which matters because uvicorn commonly runs sync
+      handlers in a worker thread pool.
+    - Never raises on timeout: expiry is converted to
+      ``CheckResult(verified=False, detail=...)``, same as every other
+      failure mode here.
+
+    Secondary benefit: the process boundary also contains any allow-list
+    bypass neither of us has found yet, which is worth having in eval-adjacent
+    code regardless of the timeout.
+
+    Skipped checks short-circuit before any of this — no computation, so no
+    need to pay the subprocess-start cost.
+    """
+    if check.kind == "skip":
+        return CheckResult(verified=False, detail=check.skip_reason or "not symbolically checkable")
+
+    try:
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        process = ctx.Process(target=_worker, args=(check.model_dump(), child_conn), daemon=True)
+        process.start()
+        child_conn.close()  # the parent only ever reads
+        process.join(timeout)
+
+        if process.is_alive():
+            process.kill()
+            process.join()
+            return CheckResult(
+                verified=False,
+                detail=(
+                    f"verification timed out after {timeout}s and was killed "
+                    "(e.g. a composed exponent tower or an expensive "
+                    "number-theoretic function)"
+                ),
+            )
+
+        if parent_conn.poll():
+            return CheckResult(**parent_conn.recv())
+
+        return CheckResult(
+            verified=False,
+            detail=f"verification process exited unexpectedly (exit code {process.exitcode})",
+        )
+    except Exception as exc:  # noqa: BLE001 - the sandboxing machinery must not raise either
+        message = str(exc).strip()
+        detail = (
+            f"verification failed: {type(exc).__name__}: {message}"
+            if message
+            else f"verification failed: {type(exc).__name__}"
+        )
+        return CheckResult(verified=False, detail=detail)
