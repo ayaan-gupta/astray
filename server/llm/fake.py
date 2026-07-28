@@ -5,7 +5,7 @@ import json
 import httpx
 
 FIXTURES: dict[str, str] = {
-    "s1_diagnose": json.dumps(
+    "Diagnosis": json.dumps(
         {
             "correct_solution": ["(x+3)^2 = 25", "x+3 = \\pm 5", "x = 2 or x = -8"],
             "sympy_check": {
@@ -31,28 +31,49 @@ FIXTURES: dict[str, str] = {
 
 
 def fake_transport(script: dict[str, str]) -> httpx.MockTransport:
-    """Return a transport that replies with the value whose key appears in the prompt.
+    """Return a transport that replies with the value whose key appears in the request.
 
-    Keys are matched as case-insensitive substrings of the serialized messages.
-    An unmatched request returns HTTP 500 so missing fixtures fail loudly.
+    Keys are matched as case-insensitive substrings of the serialized request body.
+    This allows matching on messages (for complete_json) and schema names in tools
+    (for complete_strict). An unmatched request returns HTTP 500 so missing fixtures
+    fail loudly.
+
+    Detects tool_choice to distinguish complete_json (content) from complete_strict
+    (tool_calls). For complete_strict, the fixture content is embedded in arguments.
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        blob = json.dumps(body.get("messages", [])).lower()
+        blob = json.dumps(body).lower()
         for key, content in script.items():
             if key.lower() in blob:
+                is_strict = "tool_choice" in body
+                if is_strict:
+                    message = {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "emit_answer",
+                                    "arguments": content,
+                                },
+                            }
+                        ],
+                        "reasoning_content": f"[fake reasoning for {key}]",
+                    }
+                else:
+                    message = {
+                        "role": "assistant",
+                        "content": content,
+                        "reasoning_content": f"[fake reasoning for {key}]",
+                    }
                 return httpx.Response(
                     200,
                     json={
                         "choices": [
                             {
                                 "index": 0,
-                                "message": {
-                                    "role": "assistant",
-                                    "content": content,
-                                    "reasoning_content": f"[fake reasoning for {key}]",
-                                },
+                                "message": message,
                                 "finish_reason": "stop",
                             }
                         ],
