@@ -1003,7 +1003,21 @@ git commit -m "feat: DeepSeek JSON-mode client with validation retry"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `fake_transport(script: dict[str, str]) -> httpx.MockTransport` where keys are stage names or substrings matched against the outgoing prompt, values are JSON strings returned as `content`. `FIXTURES: dict[str, str]` holding a canned diagnosis payload keyed `"s1_diagnose"`.
+- Produces: `fake_transport(script: dict[str, str]) -> httpx.MockTransport`, values are JSON
+  strings. `FIXTURES: dict[str, str]` holding a canned diagnosis payload.
+
+**Fixture keying convention — read this before adding a fixture in any later task.** Keys are
+**Pydantic model class names** (`"Diagnosis"`, `"Transcription"`), NOT stage names. A stage name
+like `"s1_diagnose"` is a module identifier that never appears in prompt text, so it can never
+match; `complete_json` and `complete_strict` both serialize `schema.model_json_schema()` into the
+request, and Pydantic puts the class name in its `"title"`, so the class name is reliably present.
+Matching is a case-insensitive substring search over the messages and tool definitions only — the
+top-level `model` field is deliberately excluded, because a key that collides with a model id
+would otherwise hijack every request using that model and return the wrong payload silently.
+Avoid keys that collide with a shared schema property name (`confidence`, `topic`) for the same
+reason. The response is shaped as a tool call when the request carries `tool_choice` (the
+`complete_strict` path) and as `content` otherwise. An unmatched request returns HTTP 500 so it
+surfaces as a loud `LlmError` rather than a plausible default.
 
 - [ ] **Step 1: Write the failing test**
 
