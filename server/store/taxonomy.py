@@ -11,7 +11,7 @@ import sqlite3
 
 from pydantic import BaseModel
 
-from server.charter.contracts import Diagnosis
+from server.charter.contracts import Diagnosis, LlmCallMeta
 from server.llm.deepseek import DeepSeekClient, LlmError
 
 logger = logging.getLogger(__name__)
@@ -153,14 +153,27 @@ def _candidates(
 
 async def resolve_misconception(
     conn: sqlite3.Connection, client: DeepSeekClient, *, diagnosis: Diagnosis, model: str
-) -> int:
+) -> tuple[int, LlmCallMeta | None]:
+    """Resolve ``diagnosis`` to a stable misconception id.
+
+    Returns ``(misconception_id, meta)``. ``meta`` is the ``LlmCallMeta`` for
+    the adjudication call that produced this result, or ``None`` when no call
+    was made at all -- the exact-canonical-rule fast path below deliberately
+    returns before touching the network. ``None`` (never a synthesized
+    zero-cost ``LlmCallMeta``) is how a caller tells "we didn't call the
+    model" apart from "we called it and it happened to be free," and lets a
+    caller that wants a token/cost ledger entry only ever write a real one.
+    A caught ``LlmError`` (the adjudication call itself failing) also
+    reports ``meta=None`` for the same reason: no billable response was ever
+    received, so there is nothing genuine to record.
+    """
     canonical = canonicalize_rule(diagnosis.buggy_rule)
 
     exact = conn.execute(
         "SELECT id FROM misconceptions WHERE canonical_rule = ?", (canonical,)
     ).fetchone()
     if exact:
-        return int(exact["id"])
+        return int(exact["id"]), None
 
     candidates = _candidates(conn, diagnosis)
     listing = "\n".join(
@@ -180,8 +193,9 @@ async def resolve_misconception(
         "Prefer matching an existing entry — near-duplicates dilute our statistics."
     )
 
+    meta: LlmCallMeta | None
     try:
-        decision, _ = await client.complete_strict(
+        decision, meta = await client.complete_strict(
             messages=[{"role": "user", "content": prompt}], schema=MatchDecision, model=model
         )
     except LlmError as exc:
@@ -197,6 +211,7 @@ async def resolve_misconception(
             diagnosis.topic,
         )
         decision = MatchDecision(new_slug=diagnosis.buggy_rule)
+        meta = None  # the call never completed, so there is no real cost to report
 
     if decision.same_as_id is not None:
         row = conn.execute(
@@ -210,7 +225,7 @@ async def resolve_misconception(
                     "UPDATE misconceptions SET aliases_json = ? WHERE id = ?",
                     (json.dumps(aliases), row["id"]),
                 )
-            return int(row["id"])
+            return int(row["id"]), meta
         # Hallucinated same_as_id with no matching row: fall through to the
         # normal new_slug minting path below instead of erroring.
 
@@ -218,7 +233,7 @@ async def resolve_misconception(
         conn, decision.new_slug or diagnosis.buggy_rule, canonical
     )
     if existing_id is not None:
-        return existing_id
+        return existing_id, meta
 
     try:
         cursor = conn.execute(
@@ -237,5 +252,5 @@ async def resolve_misconception(
         winner = conn.execute("SELECT id FROM misconceptions WHERE slug = ?", (slug,)).fetchone()
         if winner is None:
             raise
-        return int(winner["id"])
-    return int(cursor.lastrowid)
+        return int(winner["id"]), meta
+    return int(cursor.lastrowid), meta

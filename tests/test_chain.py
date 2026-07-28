@@ -208,3 +208,291 @@ async def test_llm_failure_emits_error_event_and_marks_session(tmp_path):
     events = [e async for e in chain.run_diagnosis(sid, SUBMISSION)]
     assert events[-1].type == "error"
     assert repo.get_session(conn, sid)["status"] == "failed"
+
+
+async def test_llm_failure_leaves_no_artifact_or_diagnosis_rows(tmp_path):
+    """A diagnose-stage LlmError must not leave a partial s1_diagnose artifact
+    or a diagnoses row behind -- the failure happens before either is ever
+    written, so neither should exist afterward."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": "down"}})
+
+    conn = connect(tmp_path / "t.db")
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+    chain = Chain(
+        conn, DeepSeekClient("sk", transport=httpx.MockTransport(handler)), settings=_settings()
+    )
+    async for _ in chain.run_diagnosis(sid, SUBMISSION):
+        pass
+
+    assert repo.list_artifacts(conn, sid) == []
+    assert repo.get_diagnosis(conn, sid) is None
+
+
+async def test_session_marked_in_progress_before_diagnose_call(tmp_path):
+    """A process killed mid-diagnose-call must be distinguishable from a
+    session nobody ever picked up: sessions.status must already be
+    ``in_progress`` by the time the first (stage_started) event is observed,
+    not just at the end of a successful run."""
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+    assert repo.get_session(conn, sid)["status"] == "created"
+
+    chain = Chain(conn, _client(), settings=_settings())
+    events = chain.run_diagnosis(sid, SUBMISSION)
+    first = await events.__anext__()
+    assert first.type == "stage_started"
+    assert repo.get_session(conn, sid)["status"] == "in_progress"
+
+    async for _ in events:
+        pass
+    assert repo.get_session(conn, sid)["status"] == "diagnosed"
+
+
+async def test_schema_retry_records_correct_attempt_number(tmp_path):
+    """DeepSeekClient.complete_json's schema-retry loop can take more than one
+    attempt to produce a valid Diagnosis; the winning attempt number must land
+    in run_artifacts.attempt, not always 1."""
+    calls = {"diagnose": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body.get("tools"):
+            args = json.dumps(
+                {"same_as_id": None, "new_slug": "freshmans-dream", "reasoning": "match"}
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "c",
+                                        "type": "function",
+                                        "function": {"name": "emit_answer", "arguments": args},
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 5},
+                },
+            )
+        calls["diagnose"] += 1
+        if calls["diagnose"] == 1:
+            # Unparseable content forces DeepSeekClient.complete_json to retry.
+            content = "not json at all, no braces here"
+        else:
+            content = json.dumps(DIAGNOSIS)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": content,
+                            "reasoning_content": "traced the divergence",
+                        },
+                    }
+                ],
+                "usage": {"prompt_tokens": 500, "completion_tokens": 200},
+            },
+        )
+
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+    chain = Chain(
+        conn, DeepSeekClient("sk", transport=httpx.MockTransport(handler)), settings=_settings()
+    )
+    async for _ in chain.run_diagnosis(sid, SUBMISSION):
+        pass
+
+    assert calls["diagnose"] == 2
+    artifacts = repo.list_artifacts(conn, sid)
+    diagnose_row = next(a for a in artifacts if a["stage"] == "s1_diagnose")
+    assert diagnose_row["attempt"] == 2
+
+
+async def test_exact_canonical_match_makes_no_taxonomy_call_or_artifact(tmp_path):
+    """DIAGNOSIS.buggy_rule is an exact canonical match for the seeded
+    'freshmans-dream' entry, so resolve_misconception must take its fast
+    path: zero HTTP calls to the adjudication endpoint, and no separate
+    run_artifacts row for it (only s1_diagnose)."""
+    tool_calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body.get("tools"):
+            tool_calls["n"] += 1
+            raise AssertionError("adjudication must not be called on an exact canonical match")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(DIAGNOSIS),
+                            "reasoning_content": "traced the divergence",
+                        },
+                    }
+                ],
+                "usage": {"prompt_tokens": 500, "completion_tokens": 200},
+            },
+        )
+
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+    chain = Chain(
+        conn, DeepSeekClient("sk", transport=httpx.MockTransport(handler)), settings=_settings()
+    )
+    async for _ in chain.run_diagnosis(sid, SUBMISSION):
+        pass
+
+    assert tool_calls["n"] == 0
+    artifacts = repo.list_artifacts(conn, sid)
+    assert [a["stage"] for a in artifacts] == ["s1_diagnose"]
+
+
+async def test_taxonomy_adjudication_call_is_recorded_as_its_own_artifact(tmp_path):
+    """When the buggy_rule does NOT already have an exact canonical match,
+    resolve_misconception makes a real (billable) adjudication call. That
+    call's tokens/cost must land in the ledger as its own run_artifacts row,
+    not be silently dropped."""
+    novel = {
+        **DIAGNOSIS,
+        "buggy_rule": "tan(a+b) -> tan(a) + tan(b)",
+        "misconception_statement": "Distributed tan across a sum.",
+        "topic": "trigonometry.identities",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body.get("tools"):
+            args = json.dumps(
+                {"same_as_id": None, "new_slug": "tan-distribute", "reasoning": "novel"}
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "c",
+                                        "type": "function",
+                                        "function": {"name": "emit_answer", "arguments": args},
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 5000, "completion_tokens": 5000},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(novel),
+                            "reasoning_content": "traced the divergence",
+                        },
+                    }
+                ],
+                "usage": {"prompt_tokens": 500, "completion_tokens": 200},
+            },
+        )
+
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+    chain = Chain(
+        conn, DeepSeekClient("sk", transport=httpx.MockTransport(handler)), settings=_settings()
+    )
+    async for _ in chain.run_diagnosis(sid, SUBMISSION):
+        pass
+
+    artifacts = repo.list_artifacts(conn, sid)
+    stages = [a["stage"] for a in artifacts]
+    assert "s1_diagnose" in stages
+    taxonomy_rows = [a for a in artifacts if a["stage"] != "s1_diagnose"]
+    assert len(taxonomy_rows) == 1
+    assert taxonomy_rows[0]["cost_usd"] > 0
+    assert taxonomy_rows[0]["model"] == "deepseek-v4-flash"
+    assert taxonomy_rows[0]["prompt_tokens"] == 5000
+    assert taxonomy_rows[0]["completion_tokens"] == 5000
+
+
+async def test_taxonomy_llm_error_through_chain_still_diagnoses_with_fallback_mint(tmp_path):
+    """A taxonomy adjudication failure must never fail the session: the
+    diagnose stage succeeded, so the run should still reach 'diagnosed' with
+    a fallback-minted misconception_id, and (per the ledger contract) no
+    taxonomy artifact row, since no billable call completed."""
+    novel = {
+        **DIAGNOSIS,
+        "buggy_rule": "tan(a+b) -> tan(a) + tan(b)",
+        "misconception_statement": "Distributed tan across a sum.",
+        "topic": "trigonometry.identities",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body.get("tools"):
+            return httpx.Response(500, json={"error": {"message": "adjudication down"}})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(novel),
+                            "reasoning_content": "traced the divergence",
+                        },
+                    }
+                ],
+                "usage": {"prompt_tokens": 500, "completion_tokens": 200},
+            },
+        )
+
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+    chain = Chain(
+        conn, DeepSeekClient("sk", transport=httpx.MockTransport(handler)), settings=_settings()
+    )
+    events = [e async for e in chain.run_diagnosis(sid, SUBMISSION)]
+
+    assert events[-1].type == "done"
+    assert repo.get_session(conn, sid)["status"] == "diagnosed"
+    row = repo.get_diagnosis(conn, sid)
+    assert row["misconception_id"] is not None
+    artifacts = repo.list_artifacts(conn, sid)
+    assert [a["stage"] for a in artifacts] == ["s1_diagnose"]

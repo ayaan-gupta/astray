@@ -90,10 +90,11 @@ async def test_exact_canonical_match_skips_the_llm(tmp_path):
     ).fetchone()
     diagnosis = _diagnosis("(a+b)^2 -> a^2 + b^2")
     assert taxonomy.canonicalize_rule(diagnosis.buggy_rule) == existing["canonical_rule"]
-    got = await taxonomy.resolve_misconception(
+    got, meta = await taxonomy.resolve_misconception(
         conn, client, diagnosis=diagnosis, model="deepseek-v4-flash"
     )
     assert got == existing["id"]
+    assert meta is None, "exact canonical match must not report a synthesized zero-cost call"
 
 
 async def test_llm_says_same_as_existing(tmp_path):
@@ -103,13 +104,16 @@ async def test_llm_says_same_as_existing(tmp_path):
         "SELECT id FROM misconceptions WHERE slug = 'freshmans-dream'"
     ).fetchone()["id"]
     client = _strict_client({"same_as_id": target, "new_slug": None, "reasoning": "same error"})
-    got = await taxonomy.resolve_misconception(
+    got, meta = await taxonomy.resolve_misconception(
         conn,
         client,
         diagnosis=_diagnosis("exponent distributes over a sum"),
         model="deepseek-v4-flash",
     )
     assert got == target
+    assert meta is not None
+    assert meta.prompt_tokens == 10
+    assert meta.completion_tokens == 5
 
 
 async def test_llm_mints_new_entry(tmp_path):
@@ -119,7 +123,7 @@ async def test_llm_mints_new_entry(tmp_path):
     client = _strict_client(
         {"same_as_id": None, "new_slug": "invented-tensor-rule", "reasoning": "novel"}
     )
-    got = await taxonomy.resolve_misconception(
+    got, _meta = await taxonomy.resolve_misconception(
         conn,
         client,
         diagnosis=_diagnosis("tensor index lowering is commutative", topic="linear_algebra"),
@@ -163,7 +167,7 @@ async def test_proposed_slug_colliding_with_existing_mints_distinct_row(tmp_path
     client = _strict_client(
         {"same_as_id": None, "new_slug": "freshmans-dream", "reasoning": "collides"}
     )
-    got = await taxonomy.resolve_misconception(
+    got, _meta = await taxonomy.resolve_misconception(
         conn, client, diagnosis=_diagnosis("something"), model="deepseek-v4-flash"
     )
 
@@ -209,14 +213,14 @@ async def test_slug_truncation_collision_mints_distinct_rows(tmp_path):
     # to slugifying diagnosis.buggy_rule itself for each — the same source of
     # truncation the brief's fallback-mint path uses.
     client1 = _strict_client({"same_as_id": None, "new_slug": None, "reasoning": "new"})
-    got1 = await taxonomy.resolve_misconception(
+    got1, _meta1 = await taxonomy.resolve_misconception(
         conn,
         client1,
         diagnosis=_diagnosis(rule1, topic="calculus.derivatives"),
         model="deepseek-v4-flash",
     )
     client2 = _strict_client({"same_as_id": None, "new_slug": None, "reasoning": "new"})
-    got2 = await taxonomy.resolve_misconception(
+    got2, _meta2 = await taxonomy.resolve_misconception(
         conn,
         client2,
         diagnosis=_diagnosis(rule2, topic="calculus.integrals"),
@@ -257,19 +261,21 @@ async def test_operator_only_slug_collision_mints_distinct_rows(tmp_path):
     assert taxonomy._slugify(rule1) == taxonomy._slugify(rule2) == "x-y"
 
     client1 = DeepSeekClient("sk-test", transport=httpx.MockTransport(handler))
-    got1 = await taxonomy.resolve_misconception(
+    got1, meta1 = await taxonomy.resolve_misconception(
         conn,
         client1,
         diagnosis=_diagnosis(rule1, topic="algebra.operators"),
         model="deepseek-v4-flash",
     )
     client2 = DeepSeekClient("sk-test", transport=httpx.MockTransport(handler))
-    got2 = await taxonomy.resolve_misconception(
+    got2, meta2 = await taxonomy.resolve_misconception(
         conn,
         client2,
         diagnosis=_diagnosis(rule2, topic="algebra.operators"),
         model="deepseek-v4-flash",
     )
+    assert meta1 is None, "a failed adjudication call must not report a synthesized cost"
+    assert meta2 is None
 
     assert got1 != got2, "operator-only slug collision must not merge distinct misconceptions"
     row1 = conn.execute(
@@ -300,7 +306,7 @@ async def test_llm_error_fallback_mints_from_raw_rule_and_logs(tmp_path, caplog)
     diagnosis = _diagnosis("a brand new rule the llm never gets to see", topic="new.topic")
 
     with caplog.at_level(logging.WARNING, logger="server.store.taxonomy"):
-        got = await taxonomy.resolve_misconception(
+        got, meta = await taxonomy.resolve_misconception(
             conn, client, diagnosis=diagnosis, model="deepseek-v4-flash"
         )
 
@@ -311,6 +317,7 @@ async def test_llm_error_fallback_mints_from_raw_rule_and_logs(tmp_path, caplog)
     assert row["canonical_rule"] == taxonomy.canonicalize_rule(diagnosis.buggy_rule)
     assert row["slug"]
     assert any("LLM adjudication failed" in record.message for record in caplog.records)
+    assert meta is None, "a failed adjudication call must not report a synthesized cost"
 
 
 def test_is_slug_unique_violation_classifies_correctly():
@@ -353,7 +360,7 @@ async def test_lost_slug_race_reuses_the_winning_row(tmp_path, monkeypatch):
     client = _strict_client(
         {"same_as_id": None, "new_slug": "brand-new-race-slug", "reasoning": "novel"}
     )
-    got = await taxonomy.resolve_misconception(
+    got, _meta = await taxonomy.resolve_misconception(
         conn,
         client,
         diagnosis=_diagnosis("something totally new for the race"),
@@ -403,7 +410,7 @@ async def test_alias_appended_on_confident_match(tmp_path):
     ).fetchone()["id"]
     client = _strict_client({"same_as_id": target, "new_slug": None, "reasoning": "same error"})
     new_rule = "exponent distributes over a sum, alias variant"
-    got = await taxonomy.resolve_misconception(
+    got, _meta = await taxonomy.resolve_misconception(
         conn, client, diagnosis=_diagnosis(new_rule), model="deepseek-v4-flash"
     )
     assert got == target
@@ -426,7 +433,7 @@ async def test_hallucinated_same_as_id_falls_through_to_mint(tmp_path):
     client = _strict_client(
         {"same_as_id": 999999, "new_slug": "hallucinated-id-fallback", "reasoning": "??"}
     )
-    got = await taxonomy.resolve_misconception(
+    got, _meta = await taxonomy.resolve_misconception(
         conn,
         client,
         diagnosis=_diagnosis("something new entirely"),
