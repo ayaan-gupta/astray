@@ -183,3 +183,125 @@ async def test_http_error_raises_llm_error():
         await _client(handler).complete_text(
             messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
         )
+
+
+async def test_non_dict_error_body_raises_llm_error():
+    """A proxy/gateway in front of the real API can return a JSON array or bare string
+    as its error body instead of a dict. That must not surface as AttributeError."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json=["not", "a", "dict"])
+
+    from server.llm.deepseek import LlmError
+
+    with pytest.raises(LlmError):
+        await _client(handler).complete_text(
+            messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+        )
+
+
+@pytest.mark.parametrize("body", [{}, {"choices": []}])
+async def test_malformed_success_body_raises_llm_error_via_complete_text(body):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    from server.llm.deepseek import LlmError
+
+    with pytest.raises(LlmError):
+        await _client(handler).complete_text(
+            messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+        )
+
+
+@pytest.mark.parametrize("body", [{}, {"choices": []}])
+async def test_malformed_success_body_raises_llm_error_via_complete_json(body):
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json=body)
+
+    from server.llm.deepseek import LlmError
+
+    with pytest.raises(LlmError) as exc_info:
+        await _client(handler).complete_json(
+            messages=[{"role": "user", "content": "go"}], schema=Answer, model="deepseek-v4-flash"
+        )
+    # a malformed response shape is a protocol failure, not a schema violation: it must
+    # fail immediately as the base LlmError, not get folded into the retry-exhaustion path.
+    assert not isinstance(exc_info.value, SchemaRetryExhausted)
+    assert len(calls) == 1
+
+
+async def test_thinking_false_disables_thinking_in_complete_json():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["thinking"] == {"type": "disabled"}
+        return httpx.Response(200, json=_reply('{"buggy_rule": "r", "confidence": 0.5}'))
+
+    await _client(handler).complete_json(
+        messages=[{"role": "user", "content": "go"}],
+        schema=Answer,
+        model="deepseek-v4-flash",
+        thinking=False,
+    )
+
+
+async def test_thinking_false_disables_thinking_in_complete_text():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["thinking"] == {"type": "disabled"}
+        return httpx.Response(200, json=_reply("plain text reply"))
+
+    await _client(handler).complete_text(
+        messages=[{"role": "user", "content": "go"}],
+        model="deepseek-v4-flash",
+        thinking=False,
+    )
+
+
+async def test_connect_error_raises_llm_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    from server.llm.deepseek import LlmError
+
+    with pytest.raises(LlmError):
+        await _client(handler).complete_text(
+            messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+        )
+
+
+async def test_timeout_raises_llm_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("timed out")
+
+    from server.llm.deepseek import LlmError
+
+    with pytest.raises(LlmError):
+        await _client(handler).complete_text(
+            messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+        )
+
+
+async def test_three_attempt_retry_pins_conversation_growth():
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        if len(calls) < 3:
+            return httpx.Response(200, json=_reply("not json at all"))
+        return httpx.Response(200, json=_reply('{"buggy_rule": "r", "confidence": 0.9}'))
+
+    answer, meta = await _client(handler).complete_json(
+        messages=[{"role": "user", "content": "go"}],
+        schema=Answer,
+        model="deepseek-v4-flash",
+        max_retries=2,
+    )
+    assert answer.confidence == 0.9
+    assert meta.attempts == 3
+    assert len(calls) == 3
+    # each failed attempt appends exactly one assistant turn + one corrective user turn
+    assert len(calls[1]["messages"]) == len(calls[0]["messages"]) + 2
+    assert len(calls[2]["messages"]) == len(calls[1]["messages"]) + 2
