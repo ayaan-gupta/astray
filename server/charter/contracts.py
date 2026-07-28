@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StageName(StrEnum):
@@ -32,6 +32,8 @@ class LlmCallMeta(BaseModel):
 class Transcription(BaseModel):
     """Raw vision output. Must preserve the student's errors verbatim."""
 
+    model_config = ConfigDict(extra="forbid")
+
     problem: str
     steps: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
@@ -54,6 +56,8 @@ class SympyCheck(BaseModel):
     ``kind="skip"`` means the domain is not symbolically checkable.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: Literal["equivalence", "solution_set", "skip"]
     lhs: str | None = None
     rhs: str | None = None
@@ -64,6 +68,8 @@ class SympyCheck(BaseModel):
 
 
 class Diagnosis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     correct_solution: list[str]
     sympy_check: SympyCheck
     verified_by_sympy: bool = False
