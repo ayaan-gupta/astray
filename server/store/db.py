@@ -5,6 +5,11 @@ import threading
 from pathlib import Path
 
 MIGRATIONS: list[str] = [
+    # APPEND-ONLY: scripts are numbered by list position (see _migrate below) and
+    # matched against PRAGMA user_version on the target database. Adding a new
+    # migration means appending a new string to the end of this list — never
+    # edit, remove, or reorder an existing entry, or already-deployed databases
+    # will desync from user_version and either re-run a migration or skip one.
     # v1 — Phase 1 tables. Phase 2/3 add beats, chat_messages, checkpoints, renders.
     """
     CREATE TABLE sessions (
@@ -66,6 +71,33 @@ MIGRATIONS: list[str] = [
 ]
 
 
+class _LockingCursor(sqlite3.Cursor):
+    """Cursor whose execute methods share the parent connection's write lock.
+
+    Returned by ``_SerializedConnection.cursor()`` so that
+    ``conn.cursor().execute(...)`` is exactly as serialized as
+    ``conn.execute(...)``. This is not redundant with the overrides on
+    ``_SerializedConnection`` below: pysqlite's C-level
+    ``Connection.execute``/``executemany``/``executescript`` do not dispatch
+    through the (overridable) ``cursor()`` method, so without this class a
+    caller that does ``conn.cursor().execute(...)`` directly would bypass the
+    lock entirely — verified empirically, this reproduces the exact same lost
+    writes and ``InterfaceError``s as having no lock at all.
+    """
+
+    def execute(self, sql, parameters=()):  # type: ignore[override]
+        with self.connection._write_lock:
+            return super().execute(sql, parameters)
+
+    def executemany(self, sql, parameters):  # type: ignore[override]
+        with self.connection._write_lock:
+            return super().executemany(sql, parameters)
+
+    def executescript(self, sql_script):  # type: ignore[override]
+        with self.connection._write_lock:
+            return super().executescript(sql_script)
+
+
 class _SerializedConnection(sqlite3.Connection):
     """A Connection that serializes statement execution across threads.
 
@@ -80,6 +112,10 @@ class _SerializedConnection(sqlite3.Connection):
     lock around statement execution fixes it. This is a Python-level
     add-on; it does not reintroduce ``check_same_thread=True`` and does not
     conflict with ``isolation_level=None`` autocommit or WAL.
+
+    Both the direct ``execute``/``executemany``/``executescript`` methods
+    *and* ``cursor()`` (via ``_LockingCursor``) are covered — see that
+    class's docstring for why both are needed.
     """
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -97,6 +133,9 @@ class _SerializedConnection(sqlite3.Connection):
     def executescript(self, sql_script):  # type: ignore[override]
         with self._write_lock:
             return super().executescript(sql_script)
+
+    def cursor(self, factory=_LockingCursor):  # type: ignore[override]
+        return super().cursor(factory)
 
 
 def connect(db_path: Path) -> sqlite3.Connection:

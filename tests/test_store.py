@@ -129,8 +129,14 @@ def test_deleting_session_cascades_to_artifacts_and_diagnoses(tmp_path):
     assert repo.get_diagnosis(conn, sid) is None
 
 
-def test_diagnosis_json_roundtrip_preserves_none_vs_missing(tmp_path):
-    """payload_json must reconstruct the exact same Diagnosis, incl. optional-field Nones."""
+def test_diagnosis_json_roundtrip_reconstructs_identical_model(tmp_path):
+    """payload_json must reconstruct a Diagnosis equal to the one that was saved.
+
+    Note: Diagnosis.model_dump_json() (no exclude_unset) always emits every
+    declared field, so there is no reachable "missing key" state for this model
+    to round-trip through — this test checks round-trip equality, including
+    explicit None values on optional fields, not a missing-vs-None distinction.
+    """
     conn = _conn(tmp_path)
     sid = repo.create_session(
         conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
@@ -205,3 +211,88 @@ def test_concurrent_writes_from_multiple_threads_are_not_lost(tmp_path):
 
     assert errors == []
     assert len(repo.list_artifacts(conn, sid)) == writes_per_thread * thread_count
+
+
+def test_concurrent_writes_via_raw_cursor_are_not_lost(tmp_path):
+    """conn.cursor().execute(...) must be as serialized as conn.execute(...).
+
+    _SerializedConnection only overrides execute/executemany/executescript on
+    the Connection itself; pysqlite's C-level Connection.execute does not
+    dispatch through the overridable cursor() method, so a caller reaching for
+    conn.cursor() directly (a very natural way to get cursor.lastrowid) would
+    silently bypass the lock unless cursor() itself returns a locking cursor.
+    This reproduces the original corruption exactly if that hole reopens.
+    """
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    writes_per_thread = 20
+    thread_count = 8
+    errors: list[BaseException] = []
+
+    def writer(n: int) -> None:
+        try:
+            for _i in range(writes_per_thread):
+                cur = conn.cursor()
+                cur.execute(
+                    """INSERT INTO run_artifacts (session_id, stage, payload_json, model)
+                       VALUES (?, ?, ?, ?)""",
+                    (sid, "s0_ingest", "{}", "deepseek-v4-flash"),
+                )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(thread_count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert len(repo.list_artifacts(conn, sid)) == writes_per_thread * thread_count
+
+
+def test_get_diagnosis_returns_most_recent(tmp_path):
+    """Re-diagnosis flows depend on get_diagnosis returning the latest row, not
+    the first, when a session has been diagnosed more than once."""
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    first = _diagnosis()
+    second = Diagnosis(
+        correct_solution=["x=-2", "x=8"],
+        sympy_check=SympyCheck(kind="equivalence", lhs="(x-3)**2", rhs="x**2-6*x+9"),
+        verified_by_sympy=True,
+        divergence_index=1,
+        buggy_rule="a different buggy rule",
+        misconception_statement="Second, corrected diagnosis.",
+        confidence=0.5,
+        topic="algebra.binomial_expansion",
+    )
+    repo.save_diagnosis(conn, session_id=sid, diagnosis=first, misconception_id=None)
+    repo.save_diagnosis(conn, session_id=sid, diagnosis=second, misconception_id=None)
+
+    row = repo.get_diagnosis(conn, sid)
+
+    assert row["buggy_rule"] == "a different buggy rule"
+    assert row["statement"] == "Second, corrected diagnosis."
+
+
+def test_diagnosis_requires_valid_misconception_id(tmp_path):
+    """diagnoses.misconception_id FK must reject an id with no matching row.
+
+    Task 9 starts populating the misconceptions table, so this becomes a live
+    path rather than a theoretical one.
+    """
+    import sqlite3
+
+    import pytest
+
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.save_diagnosis(conn, session_id=sid, diagnosis=_diagnosis(), misconception_id=9999)
