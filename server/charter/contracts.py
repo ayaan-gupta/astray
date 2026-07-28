@@ -47,6 +47,7 @@ class StudentSubmission(BaseModel):
     source: Literal["typed", "photo"] = "typed"
     transcription_confidence: float | None = None
     student_corrected: bool = False
+    unreadable: list[str] = Field(default_factory=list)
 
 
 class SympyCheck(BaseModel):

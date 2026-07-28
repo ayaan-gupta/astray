@@ -52,13 +52,13 @@ async def ingest_photo(
     ``VisionUnavailable``. That is deliberately NOT caught here: mapping it to an HTTP
     503 is a route's job (Task 12/13), not this stage's.
 
-    NOTE: ``transcription.unreadable`` (the list of regions the model couldn't read) is
-    not carried onto ``StudentSubmission`` -- that contract (Task 2) has no field for
-    it, and adding one is out of scope for this stage. ``needs_review`` below therefore
-    relies on ``confidence`` alone as the review signal; ``TRANSCRIBE_PROMPT`` instructs
-    the model to set confidence to its *overall* accuracy, which should already be
-    dragged down by any unreadable region. A completely blank/unreadable transcription
-    is still caught explicitly below, independent of what confidence value comes back.
+    ``transcription.unreadable`` (the regions the model flagged as unreadable) is
+    carried onto ``StudentSubmission.unreadable`` verbatim, so ``needs_review`` below
+    can force a review even when the model's overall ``confidence`` is high -- a model
+    that reads most of a photo cleanly but guesses at one blurry line may still report
+    high confidence overall, and that guess is exactly the case that must be confirmed
+    by the student before diagnosis. Carrying the list through (rather than just a
+    boolean) also lets a future UI point at *which* line was unclear.
     """
     transcription, meta = await provider.transcribe(image_bytes, mime_type)
     submission = StudentSubmission(
@@ -68,6 +68,7 @@ async def ingest_photo(
         source="photo",
         transcription_confidence=transcription.confidence,
         student_corrected=False,
+        unreadable=transcription.unreadable,
     )
     return submission, meta
 
@@ -76,7 +77,10 @@ def needs_review(submission: StudentSubmission) -> bool:
     """True when the UI must block on student confirmation of the transcription.
 
     Typed input and anything the student has already confirmed/corrected never need
-    review. For an unconfirmed photo, review is required when either:
+    review. For an unconfirmed photo, review is required when any of:
+      - the model flagged one or more regions as unreadable (``submission.unreadable``
+        non-empty) -- forced regardless of the reported confidence, since a model that
+        guessed at a blurry line can still self-report high overall confidence; or
       - the transcription is entirely blank (no problem, no non-blank step) -- a
         malformed or unreadable photo can still come back with a high confidence
         value, so this is checked independent of the confidence score; or
@@ -86,6 +90,8 @@ def needs_review(submission: StudentSubmission) -> bool:
         return False
     if submission.source != "photo":
         return False
+    if submission.unreadable:
+        return True
     transcribed_nothing = not submission.problem.strip() and not any(
         step.strip() for step in submission.steps
     )

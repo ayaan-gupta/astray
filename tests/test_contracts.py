@@ -21,6 +21,7 @@ def test_submission_defaults():
     assert s.prose is None
     assert s.student_corrected is False
     assert s.transcription_confidence is None
+    assert s.unreadable == []
 
 
 def test_submission_literal_rejection():

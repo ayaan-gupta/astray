@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -130,10 +132,72 @@ async def test_ingest_photo_that_transcribes_to_nothing_needs_review():
     assert needs_review(submission) is True
 
 
+async def test_ingest_photo_carries_unreadable_and_forces_review():
+    """Reviewer-found gap: a model that reads most of the work but guesses at one blurry
+    line can still self-report high overall confidence. `unreadable` must be carried onto
+    the submission and must force `needs_review` regardless of that confidence score --
+    otherwise a wrong guess on the blurry line reaches diagnosis unconfirmed."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": json.dumps(
+                                        {
+                                            "problem": "(x+3)^2=25",
+                                            "steps": ["x^2+9=25"],
+                                            "confidence": 0.9,
+                                            "unreadable": ["middle step blurry"],
+                                        }
+                                    )
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 20},
+            },
+        )
+
+    provider = GeminiVision("AQ.test", transport=httpx.MockTransport(handler))
+    submission, _ = await ingest_photo(provider, b"png", "image/png")
+    assert submission.unreadable == ["middle step blurry"]
+    assert submission.transcription_confidence == pytest.approx(0.9)
+    assert needs_review(submission) is True
+
+
+def test_needs_review_true_for_unreadable_regions_despite_high_confidence():
+    flagged = StudentSubmission(
+        problem="p",
+        steps=["a"],
+        source="photo",
+        transcription_confidence=0.99,
+        unreadable=["line 2"],
+    )
+    assert needs_review(flagged) is True
+
+
 def test_needs_review_true_below_threshold():
     low = StudentSubmission(problem="p", steps=["a"], source="photo", transcription_confidence=0.5)
     assert needs_review(low) is True
     assert LOW_CONFIDENCE_THRESHOLD > 0.5
+
+
+def test_needs_review_false_at_exact_threshold():
+    """Pins the comparison as strictly less-than: a confidence exactly equal to the
+    threshold must NOT be treated as low."""
+    at_threshold = StudentSubmission(
+        problem="p",
+        steps=["a"],
+        source="photo",
+        transcription_confidence=LOW_CONFIDENCE_THRESHOLD,
+    )
+    assert needs_review(at_threshold) is False
 
 
 def test_needs_review_false_for_corrected_photo():
@@ -161,3 +225,70 @@ def test_needs_review_true_for_missing_confidence():
 async def test_ingest_photo_without_provider_raises():
     with pytest.raises(VisionUnavailable):
         await ingest_photo(NullVision(), b"png", "image/png")
+
+
+# Regression guard for the "preserve the student's errors exactly" property: unusual step
+# shapes that a future "helpful" refactor of the stripping/splitting logic could plausibly
+# mangle. Reviewer verified these by hand for round 1; pinned here so a regression fails CI
+# instead of requiring another manual pass.
+UNUSUAL_STEP_SHAPES = [
+    pytest.param("x−9=16", id="unicode-minus"),  # U+2212, not an ASCII hyphen
+    pytest.param("\\frac{x}{2}=4", id="latex-fragment"),
+    pytest.param("x+3=", id="trailing-operator"),
+    pytest.param("=", id="equals-only"),
+    pytest.param("x    =    4", id="internal-alignment-spaces"),
+]
+
+
+@pytest.mark.parametrize("step", UNUSUAL_STEP_SHAPES)
+def test_ingest_typed_preserves_unusual_step_content(step):
+    """`work` is split into one step per non-blank line; only the line's *surrounding*
+    whitespace is stripped (that's sanctioned formatting normalization -- see
+    test_ingest_typed_drops_blank_lines). Everything inside the line, however unusual,
+    must come out identical."""
+    s = ingest_typed(problem="p", work=step, prose=None)
+    assert s.steps == [step]
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        *UNUSUAL_STEP_SHAPES,
+        pytest.param("   x=4", id="leading-alignment-whitespace"),
+        pytest.param("x=4   ", id="trailing-alignment-whitespace"),
+    ],
+)
+async def test_ingest_photo_preserves_unusual_step_content(step):
+    """Unlike the typed path, ingest_photo applies zero transformation to a transcribed
+    step -- not even whitespace stripping -- since the vision model's own formatting
+    (including leading whitespace used as handwritten alignment) is trusted verbatim."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": json.dumps(
+                                        {
+                                            "problem": "p",
+                                            "steps": [step],
+                                            "confidence": 0.9,
+                                            "unreadable": [],
+                                        }
+                                    )
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
+            },
+        )
+
+    provider = GeminiVision("AQ.test", transport=httpx.MockTransport(handler))
+    submission, _ = await ingest_photo(provider, b"png", "image/png")
+    assert submission.steps == [step]
