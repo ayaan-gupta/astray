@@ -63,7 +63,7 @@ Every task's requirements implicitly include this section.
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `server.config.Settings`, `server.config.get_settings() -> Settings` (lru_cached). Fields: `deepseek_api_key: str`, `gemini_api_key: str | None`, `deepseek_model_reasoning: str`, `deepseek_model_fast: str`, `gemini_model_vision: str`, `render_timeout_s: int`, `render_max_repairs: int`, `fake_llm: bool`, `db_path: Path`, `media_root: Path`. Property `vision_enabled: bool`.
+- Produces: `server.config.Settings`, `server.config.get_settings() -> Settings` (lru_cached). Fields: `deepseek_api_key: str`, `gemini_api_key: str | None`, `deepseek_model_reasoning: str`, `deepseek_model_fast: str`, `gemini_model_vision: str`, `deepseek_base_url: str`, `gemini_base_url: str`, `llm_timeout_s: int`, `llm_max_retries: int`, `render_timeout_s: int`, `render_max_repairs: int`, `fake_llm: bool`, `db_path: Path`, `media_root: Path`. Property `vision_enabled: bool`.
 
 - [ ] **Step 1: Create `pyproject.toml`**
 
