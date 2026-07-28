@@ -296,3 +296,92 @@ def test_diagnosis_requires_valid_misconception_id(tmp_path):
     )
     with pytest.raises(sqlite3.IntegrityError):
         repo.save_diagnosis(conn, session_id=sid, diagnosis=_diagnosis(), misconception_id=9999)
+
+
+def test_concurrent_identical_reads_return_the_correct_row(tmp_path):
+    """Locking only execute() (not the fetch that follows) still lets pysqlite's
+    statement cache hand two threads the same in-flight prepared statement for
+    identical SQL text. The corruption isn't only lost writes or exceptions —
+    it includes *silently wrong reads*: None, an empty string, or another
+    thread's row, with nothing raised. This must never happen, not merely
+    never raise, so this asserts the actual value on every read.
+    """
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    diagnosis = _diagnosis()
+    repo.save_diagnosis(conn, session_id=sid, diagnosis=diagnosis, misconception_id=None)
+
+    reader_count = 12
+    reads_per_thread = 50
+    errors: list[BaseException] = []
+    wrong: list[object] = []
+
+    def reader() -> None:
+        try:
+            for _ in range(reads_per_thread):
+                row = repo.get_diagnosis(conn, sid)
+                if row is None or row["buggy_rule"] != diagnosis.buggy_rule:
+                    wrong.append(row["buggy_rule"] if row is not None else None)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=reader) for _ in range(reader_count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert wrong == []
+
+
+def test_concurrent_fetchall_via_cursor_returns_the_exact_row_count(tmp_path):
+    """Same statement-cache hazard as above, but for fetchall() reached via
+    conn.cursor() rather than conn.execute(). The observed failure mode was
+    over-counting (e.g. 502 rows read back from a 200-row table), so this
+    pins the exact count on every read, not merely the absence of an
+    exception.
+    """
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    expected_rows = 40
+    for i in range(expected_rows):
+        repo.record_artifact(
+            conn,
+            session_id=sid,
+            stage=StageName.INGEST,
+            payload={"i": i},
+            meta=LlmCallMeta(model="deepseek-v4-flash"),
+        )
+
+    reader_count = 9
+    reads_per_thread = 15
+    errors: list[BaseException] = []
+    wrong_counts: list[int] = []
+
+    def reader() -> None:
+        try:
+            for _ in range(reads_per_thread):
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM run_artifacts WHERE session_id = ? ORDER BY id",
+                    (sid,),
+                )
+                rows = cur.fetchall()
+                if len(rows) != expected_rows:
+                    wrong_counts.append(len(rows))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=reader) for _ in range(reader_count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert wrong_counts == []
