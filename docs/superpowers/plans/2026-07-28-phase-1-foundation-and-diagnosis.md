@@ -22,7 +22,24 @@ Every task's requirements implicitly include this section.
 - **No test may make a network call.** All HTTP is injected via `httpx.MockTransport`.
 - Secrets live only in `server/.env` (gitignored). Never logged, never in artifacts, never returned by the API.
 - Cache-friendly prompting: the shared preamble goes FIRST in every message list (cache hits are ~50× cheaper).
-- Student-supplied text is untrusted. It MUST be wrapped in labeled delimiters in every prompt.
+- Student-supplied text is untrusted. It MUST be wrapped in labeled delimiters in every prompt —
+  **and the delimiters MUST be per-request nonces**, not fixed literals. A fixed marker is
+  forgeable: a student step containing `<<<END_STUDENT_INPUT>>>` closes the block early and can
+  reopen it, placing an injected instruction outside what the model parses as student data. This
+  was demonstrated, not theorized. Generate an unpredictable token per call, keep the preamble's
+  instruction text byte-identical so prefix caching still hits (put the nonce in the user message),
+  and neutralize marker-like sequences in student content as a second layer. Never neutralize by
+  deleting content — preserving the student's work verbatim is the product.
+- **SymPy's `parse_expr` calls Python's `eval`.** This was not theoretical: running the original
+  Task 7 sample code, `__import__('os').system(...)` executed for real and
+  `().__class__.__bases__[0]` returned `<class 'object'>`. The strings reaching it come from a
+  model whose prompt contains untrusted student text, so this is a live boundary, not a
+  hypothetical one. Any expression parsed from model output MUST pass a character allow-list that
+  bans quotes (kills every string-literal vector), brackets (kills subscripting), dot-before-letter
+  (kills attribute chains), and dunder names — AND run under a hard wall-clock bound in a process
+  that can be killed, since an allow-listed expression can still hang forever (`2**2**2**2**2**2`
+  is 16 characters and never returns) or burn minutes of CPU (`factorial(2000000)`). Defense in
+  depth: the allow-list is the filter, the process bound is the backstop.
 - Line length 100. Format/lint with `ruff`.
 
 ---
@@ -47,6 +64,7 @@ Every task's requirements implicitly include this section.
 | `server/charter/stages/s0_ingest.py` | Normalize typed/photo input |
 | `server/charter/stages/s1_diagnose.py` | The diagnosis engine |
 | `server/charter/chain.py` | Orchestrator, artifact persistence, progress events |
+| `server/deps.py` | Builds the LLM and vision clients from settings |
 | `server/app.py` | FastAPI routes + SSE |
 | `evals/diagnosis/cases.yaml` | 20 labeled diagnosis cases |
 | `evals/diagnosis/run.py` | Eval harness + scoring |
@@ -62,7 +80,7 @@ Every task's requirements implicitly include this section.
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `server.config.Settings`, `server.config.get_settings() -> Settings` (lru_cached). Fields: `deepseek_api_key: str`, `gemini_api_key: str | None`, `deepseek_model_reasoning: str`, `deepseek_model_fast: str`, `gemini_model_vision: str`, `render_timeout_s: int`, `render_max_repairs: int`, `fake_llm: bool`, `db_path: Path`, `media_root: Path`. Property `vision_enabled: bool`.
+- Produces: `server.config.Settings`, `server.config.get_settings() -> Settings` (lru_cached). Fields: `deepseek_api_key: str`, `gemini_api_key: str | None`, `deepseek_model_reasoning: str`, `deepseek_model_fast: str`, `gemini_model_vision: str`, `deepseek_base_url: str`, `gemini_base_url: str`, `llm_timeout_s: int`, `llm_max_retries: int`, `render_timeout_s: int`, `render_max_repairs: int`, `fake_llm: bool`, `db_path: Path`, `media_root: Path`. Property `vision_enabled: bool`.
 
 - [ ] **Step 1: Create `pyproject.toml`**
 
@@ -295,7 +313,15 @@ Create empty `server/charter/__init__.py`. Create `server/charter/contracts.py`:
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+# Models parsed from raw LLM JSON set extra="forbid". Pydantic's default
+# ("ignore") would silently drop a hallucinated or misspelled key, yielding a
+# confident-looking diagnosis built on a default value. Forbidding extras turns
+# that into a ValidationError, which DeepSeekClient.complete_json feeds back to
+# the model as a self-correcting retry, and makes Pydantic emit
+# "additionalProperties": false into the schema injected into the prompt.
+# Models we construct ourselves (StudentSubmission, LlmCallMeta) keep the default.
 
 
 class StageName(StrEnum):
@@ -326,6 +352,8 @@ class LlmCallMeta(BaseModel):
 class Transcription(BaseModel):
     """Raw vision output. Must preserve the student's errors verbatim."""
 
+    model_config = ConfigDict(extra="forbid")
+
     problem: str
     steps: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
@@ -339,6 +367,12 @@ class StudentSubmission(BaseModel):
     source: Literal["typed", "photo"] = "typed"
     transcription_confidence: float | None = None
     student_corrected: bool = False
+    # Lines the vision model could not read. A non-empty list forces the review
+    # gate regardless of the confidence the model claims for itself — otherwise a
+    # photo with one blurry step and a self-reported 0.9 sails through, and the
+    # diagnosis stage analyses a mistake the student never made. Carried through
+    # so the UI can name the unclear line instead of asking for the whole photo again.
+    unreadable: list[str] = Field(default_factory=list)
 
 
 class SympyCheck(BaseModel):
@@ -347,6 +381,8 @@ class SympyCheck(BaseModel):
     The model emits SymPy-parseable syntax (``**`` not ``^``), never LaTeX.
     ``kind="skip"`` means the domain is not symbolically checkable.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     kind: Literal["equivalence", "solution_set", "skip"]
     lhs: str | None = None
@@ -358,6 +394,8 @@ class SympyCheck(BaseModel):
 
 
 class Diagnosis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     correct_solution: list[str]
     sympy_check: SympyCheck
     verified_by_sympy: bool = False
@@ -413,18 +451,28 @@ def test_pro_cost_with_cache_hits():
 
 
 def test_flash_cost_no_cache():
+    # (1000 * 0.14 + 1000 * 0.28) / 1e6 = 420 / 1e6. Assert the literal, not the
+    # formula: re-typing the rates here would hide a wrong rate in RATES.
     got = cost_usd("deepseek-v4-flash", prompt_tokens=1000, completion_tokens=1000)
-    assert got == pytest.approx((1000 * 0.14 + 1000 * 0.28) / 1_000_000, rel=1e-9)
+    assert got == pytest.approx(0.00042, rel=1e-9)
 
 
 def test_gemini_vision_cost():
+    # (1125 * 0.30 + 83 * 2.50) / 1e6 = (337.5 + 207.5) / 1e6 = 545 / 1e6
     got = cost_usd("gemini-3.5-flash-lite", prompt_tokens=1125, completion_tokens=83)
-    assert got == pytest.approx((1125 * 0.30 + 83 * 2.50) / 1_000_000, rel=1e-9)
+    assert got == pytest.approx(0.000545, rel=1e-9)
 
 
-def test_cached_exceeding_prompt_does_not_go_negative():
+def test_cached_exceeding_prompt_is_capped_at_prompt_tokens():
+    # cached caps to 100, miss becomes 0, so 100 * 0.0028 / 1e6 = 2.8e-7.
+    # Assert the value, not just the sign — `>= 0` passes for any wrong answer.
     got = cost_usd("deepseek-v4-flash", prompt_tokens=100, completion_tokens=0, cached_tokens=500)
-    assert got >= 0.0
+    assert got == pytest.approx(2.8e-7, rel=1e-9)
+
+
+def test_negative_completion_tokens_clamped_to_zero():
+    got = cost_usd("deepseek-v4-flash", prompt_tokens=0, completion_tokens=-1000)
+    assert got == 0.0
 
 
 def test_unknown_model_raises():
@@ -475,9 +523,13 @@ def cost_usd(
     except KeyError as exc:
         raise UnknownModelError(f"no price entry for model {model!r}") from exc
 
+    # Clamp every count. A malformed API response must never produce a negative
+    # ledger entry — that is the exact class of plausible-looking wrong number
+    # this module exists to prevent.
     cached = min(max(cached_tokens, 0), max(prompt_tokens, 0))
     miss = max(prompt_tokens - cached, 0)
-    total = miss * rate.input_miss + cached * rate.input_hit + completion_tokens * rate.output
+    out = max(completion_tokens, 0)
+    total = miss * rate.input_miss + cached * rate.input_hit + out * rate.output
     return total / 1_000_000
 ```
 
@@ -511,6 +563,17 @@ This is the load-bearing task. The retry-with-error-feedback loop is what substi
   - `async complete_strict(*, messages: list[dict], schema: type[T], model: str) -> tuple[T, LlmCallMeta]`
   - `async complete_text(*, messages: list[dict], model: str, thinking: bool = True) -> tuple[str, LlmCallMeta]`
   - `class LlmError(Exception)`, `class SchemaRetryExhausted(LlmError)`
+
+**Error contract for every later caller:** all four failure modes raise `LlmError` or a
+subclass — never a bare `KeyError`, `IndexError`, or `AttributeError`. That covers a non-2xx
+status, a transport error (`httpx.ConnectError`, `httpx.TimeoutException`), a non-2xx body that
+is valid JSON but not a dict, and a 200 whose `choices` is missing, empty, or malformed. A
+private `_message(body)` helper enforces the response shape at every call site. Note the
+asymmetry: a *protocol* failure (bad response shape) raises immediately and is NOT retried,
+because retrying cannot fix it; only a *content* failure (`ValueError`/`ValidationError` from
+parsing or schema validation) enters the retry loop with the error text fed back to the model.
+So `except LlmError` is sufficient for callers, and catching `SchemaRetryExhausted` separately
+distinguishes "the model could not produce valid output" from "the API misbehaved".
 
 - [ ] **Step 1: Write the failing test**
 
@@ -963,7 +1026,21 @@ git commit -m "feat: DeepSeek JSON-mode client with validation retry"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `fake_transport(script: dict[str, str]) -> httpx.MockTransport` where keys are stage names or substrings matched against the outgoing prompt, values are JSON strings returned as `content`. `FIXTURES: dict[str, str]` holding a canned diagnosis payload keyed `"s1_diagnose"`.
+- Produces: `fake_transport(script: dict[str, str]) -> httpx.MockTransport`, values are JSON
+  strings. `FIXTURES: dict[str, str]` holding a canned diagnosis payload.
+
+**Fixture keying convention — read this before adding a fixture in any later task.** Keys are
+**Pydantic model class names** (`"Diagnosis"`, `"Transcription"`), NOT stage names. A stage name
+like `"s1_diagnose"` is a module identifier that never appears in prompt text, so it can never
+match; `complete_json` and `complete_strict` both serialize `schema.model_json_schema()` into the
+request, and Pydantic puts the class name in its `"title"`, so the class name is reliably present.
+Matching is a case-insensitive substring search over the messages and tool definitions only — the
+top-level `model` field is deliberately excluded, because a key that collides with a model id
+would otherwise hijack every request using that model and return the wrong payload silently.
+Avoid keys that collide with a shared schema property name (`confidence`, `topic`) for the same
+reason. The response is shaped as a tool call when the request carries `tool_choice` (the
+`complete_strict` path) and as `content` otherwise. An unmatched request returns HTTP 500 so it
+surfaces as a loud `LlmError` rather than a plausible default.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1335,7 +1412,15 @@ This is what makes the diagnosis anchored rather than self-reported. LaTeX parsi
 
 **Interfaces:**
 - Consumes: `server.charter.contracts.SympyCheck`
-- Produces: `run_check(check: SympyCheck) -> CheckResult` where `CheckResult` is a Pydantic model with `verified: bool`, `detail: str`. Never raises — malformed input returns `verified=False` with the reason in `detail`.
+- Produces: `run_check(check: SympyCheck) -> CheckResult` where `CheckResult` is a Pydantic model
+  with `verified: bool`, `detail: str`. Never raises — malformed input returns `verified=False`
+  with the reason in `detail`, and so does a timeout.
+- Also produces `async run_check_async(check: SympyCheck) -> CheckResult`. **Async callers
+  (Task 11, Task 12, Task 13) MUST use this one.** The check runs in a killable subprocess with a
+  wall-clock bound, because an allow-listed expression can still hang forever; `run_check` blocks
+  its calling thread for up to that timeout, so calling it inline from a coroutine stalls every
+  other request on the worker. `run_check_async` wraps it in `asyncio.to_thread`. Budget ~0.3s of
+  process-spawn overhead per call — paid once per check, not per parsed field.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1700,7 +1785,22 @@ MIGRATIONS: list[str] = [
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, isolation_level=None)
+    # check_same_thread=False is required: FastAPI dispatches `def` routes on a
+    # threadpool worker while `async def` routes and startup run on the loop
+    # thread, so one connection is touched from several threads.
+    #
+    # It is NOT sufficient on its own. An earlier draft of this comment claimed
+    # autocommit + WAL + busy_timeout made the shared connection safe; that is
+    # false and was disproved by measurement — 5 threads x 20 writes lost 2-19
+    # rows and raised InterfaceError in 15 of 15 trials. sqlite3.threadsafety==3
+    # describes the SQLite C library's thread mode, not pysqlite's safety when
+    # several threads call execute() on one Connection object; WAL and
+    # busy_timeout govern file locking and transactions, not C-API call safety.
+    # Statement execution must therefore be serialized with a lock, and the lock
+    # must cover cursor-level execution too — conn.cursor().execute() bypasses a
+    # wrapper that only overrides Connection.execute, and reproduces the full
+    # corruption.
+    conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -2156,12 +2256,17 @@ class MatchDecision(BaseModel):
 def canonicalize_rule(rule: str) -> str:
     """Collapse cosmetic differences so the same error matches across problems.
 
-    Single-letter variables become ``v`` and numerals become ``n``, so
-    ``(x+3)^2 -> x^2+9`` and ``(t+5)^2 -> t^2+25`` share one canonical form.
+    Single-letter variables become ``v`` and numerals become ``#``, so
+    ``(x+3)^2 -> x^2+9`` and ``(t+5)^2 -> t^2+25`` share one canonical form
+    while ``(a+b)^2 -> a^2+b^2`` stays distinct from both.
+
+    The numeral placeholder MUST NOT be a lowercase letter: ``_VAR_RUN``
+    runs afterwards and would re-capture it as a variable, collapsing
+    digits and variables into the same token.
     """
     text = rule.strip().lower()
     text = text.replace("→", "->").replace("=>", "->")
-    text = _NUM.sub("n", text)
+    text = _NUM.sub("#", text)
     text = _VAR_RUN.sub("v", text)
     text = _WS.sub("", text)
     return text
@@ -3229,7 +3334,7 @@ def build_vision(settings: Settings) -> VisionProvider:
 import json
 from collections.abc import Callable
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
@@ -3805,12 +3910,39 @@ Baseline rule-match rate: <FILL IN from step 6>"
 
 ## Phase 1 Definition of Done
 
-- [ ] `uv run pytest -q` — all green, zero network calls
-- [ ] `uv run ruff check server tests evals` — clean
-- [ ] `uv run python -m evals.diagnosis.run` — ≥80% rule match, baseline recorded
-- [ ] Manual smoke test (Task 13 Step 7) returns a correct diagnosis over SSE
-- [ ] `git check-ignore server/.env` confirms secrets are untracked
-- [ ] `sqlite3 data/tutor.db "SELECT stage, model, cost_usd FROM run_artifacts"` shows provenance
+- [x] `uv run pytest -q` — 280 passed, 1 intentional xfail, zero network calls
+- [x] `uv run ruff check server tests evals` — clean, and `ruff format --check` too
+- [ ] `uv run python -m evals.diagnosis.run` — ≥80% rule match. **Not met. See below.**
+- [x] Manual smoke test returns a correct diagnosis over SSE — verified against the live
+      DeepSeek API through real uvicorn: `(a+b)^2 -> a^2 + b^2`, `verified_by_sympy=true`,
+      matched to the seeded `freshmans-dream`, $0.0018 in 9.9s
+- [x] `git check-ignore server/.env` confirms secrets are untracked
+- [x] `run_artifacts` shows provenance — `s1_diagnose` / `deepseek-v4-pro` / cost recorded
+
+### The eval gate does not yet measure what it claims
+
+Two live runs on identical code: **11/20 and 10/20 rule match — with substantially different
+failing sets.** Cases that passed one run failed the next and vice versa.
+
+Reading every failure against its case definition, the diagnoses are substantively correct in
+essentially all of them. They fail on notation the model legitimately varies between runs:
+`log(a+b) -> log(a) + log(b)` versus `log(a + b) -> log a + log b`; prime notation versus
+`d/dx`; one pair of parentheses; `cx` versus `a x`. Two rounds of case-set correction moved
+which cases fail without moving the number, which is the tell: `canonicalize_rule` normalizes
+variable names and digits but not notational form, and no bag-of-words overlap threshold
+separates a correct paraphrase from a confidently wrong one — that was measured, not assumed
+(a disclaiming attack scored 0.263 against a legitimate match's 0.105 on the same alias;
+Jaccard and Dice behave the same way).
+
+**The two metrics that are trustworthy both look good: topic match 20/20, SymPy verification
+18/20.** Those measure what they claim. Rule match does not, and the honest reading is that
+the gate needs semantic comparison — an LLM judge scoring "same misconception, yes or no" —
+rather than string matching. That is Phase 2 work.
+
+The gate was deliberately **not** tuned until it passed. Adding aliases to chase each run's
+phrasing would fit the gate to the model it grades and destroy the only measurement of
+diagnosis quality in the project. `_PASS_THRESHOLD` stays at 0.8 and the harness exits
+non-zero, which is the truthful state.
 
 ---
 

@@ -1,0 +1,155 @@
+- id: freshmans-dream-solve
+  problem: "Solve (x+3)^2 = 25"
+  steps: ["x^2 + 9 = 25", "x^2 = 16", "x = 4"]
+  expected_rule: "(a+b)^2 -> a^2 + b^2"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["exponent distributes over sum", "dropped cross term", "2ab missing"]
+
+- id: fraction-add-across
+  problem: "Compute 1/2 + 1/3"
+  steps: ["= (1+1)/(2+3)", "= 2/5"]
+  expected_rule: "a/b + c/d -> (a+c)/(b+d)"
+  expected_topic_prefix: "arithmetic"
+  accept_aliases: ["added numerators and denominators"]
+
+- id: negative-distribute
+  problem: "Simplify 5 - (x + 2)"
+  steps: ["= 5 - x + 2", "= 7 - x"]
+  expected_rule: "-(a+b) -> -a + b"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["minus sign not distributed", "sign error on second term"]
+
+- id: cancel-across-sum
+  problem: "Simplify (x + 4)/4"
+  steps: ["= x"]
+  expected_rule: "(a+b)/b -> a"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["cancelled an added term", "cancelling across a sum"]
+
+- id: log-of-sum
+  problem: "Expand log(x + y)"
+  steps: ["= log x + log y"]
+  expected_rule: "log(a+b) -> log(a) + log(b)"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["log of a sum as sum of logs"]
+
+- id: sqrt-of-sum
+  problem: "Simplify sqrt(9 + 16)"
+  steps: ["= sqrt(9) + sqrt(16)", "= 3 + 4", "= 7"]
+  expected_rule: "sqrt(a+b) -> sqrt(a) + sqrt(b)"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["root of a sum as sum of roots"]
+
+- id: power-of-power
+  problem: "Simplify (x^2)^3"
+  steps: ["= x^5"]
+  expected_rule: "(a^m)^n -> a^(m+n)"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["added exponents instead of multiplying"]
+
+- id: exponent-product
+  problem: "Simplify x^2 * x^3"
+  steps: ["= x^6"]
+  expected_rule: "a^m * a^n -> a^(m*n)"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["multiplied exponents instead of adding"]
+
+- id: single-root
+  problem: "Solve x^2 = 49"
+  steps: ["x = 7"]
+  expected_rule: "x^2 = k -> x = sqrt(k)"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["lost the negative root", "only positive root"]
+
+- id: divide-by-variable
+  problem: "Solve x^2 = 5x"
+  steps: ["x = 5"]
+  expected_rule: "x^2 = cx -> x = c"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["divided by x and lost x=0", "x^2 = c x -> x = c"]
+
+- id: inequality-flip
+  problem: "Solve -3x < 9"
+  steps: ["x < -3"]
+  expected_rule: "divide by negative without flipping inequality"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["did not reverse the inequality"]
+
+- id: zero-product-misuse
+  problem: "Solve (x-2)(x-3) = 6"
+  steps: ["x - 2 = 6", "x = 8"]
+  expected_rule: "(x-a)(x-b) = c -> x-a = c"
+  expected_topic_prefix: "algebra"
+  accept_aliases:
+    [
+      "zero product property applied to nonzero",
+      "set a factor equal to the constant instead of zero",
+      "zero product rule only applies when the product is zero",
+    ]
+
+- id: transposition-sign
+  problem: "Solve x + 5 = 9"
+  steps: ["x = 9 + 5", "x = 14"]
+  expected_rule: "x + a = b -> x = b + a"
+  expected_topic_prefix: "algebra"
+  accept_aliases:
+    [
+      "moved a term across = without changing its sign",
+      "sign error when transposing",
+      "kept the same sign instead of negating",
+      "kept the same sign when moving a term",
+    ]
+
+- id: like-terms
+  problem: "Simplify x + x^2"
+  steps: ["= x^3"]
+  expected_rule: "a + a^n -> a^(n+1)"
+  expected_topic_prefix: "algebra"
+  accept_aliases: ["combined unlike terms"]
+
+- id: chain-rule-omitted
+  problem: "Differentiate sin(3x)"
+  steps: ["= cos(3x)"]
+  expected_rule: "d/dx f(g(x)) -> f'(g(x))"
+  expected_topic_prefix: "calculus"
+  accept_aliases: ["forgot the inner derivative", "chain rule omitted"]
+
+- id: product-rule
+  problem: "Differentiate x^2 * sin(x)"
+  steps: ["= 2x * cos(x)"]
+  expected_rule: "d/dx (f*g) -> f' * g'"
+  expected_topic_prefix: "calculus"
+  accept_aliases: ["product of derivatives", "(f*g)' -> f' * g'"]
+
+- id: quotient-rule
+  problem: "Differentiate x^2 / cos(x)"
+  steps: ["= 2x / (-sin(x))"]
+  expected_rule: "d/dx (f/g) -> f'/g'"
+  expected_topic_prefix: "calculus"
+  accept_aliases: ["quotient of derivatives"]
+
+- id: power-rule-exponential
+  problem: "Differentiate 2^x"
+  steps: ["= x * 2^(x-1)"]
+  expected_rule: "d/dx a^x -> x*a^(x-1)"
+  expected_topic_prefix: "calculus"
+  accept_aliases: ["power rule on an exponential", "d/dx (a^x) -> x*a^(x-1)"]
+
+- id: trig-distribute
+  problem: "Expand sin(a + b)"
+  steps: ["= sin a + sin b"]
+  expected_rule: "sin(a+b) -> sin(a) + sin(b)"
+  expected_topic_prefix: "trigonometry"
+  accept_aliases: ["distributed sine over a sum"]
+
+- id: scale-factor-area
+  problem: "A square's sides are doubled. What happens to its area?"
+  steps: ["The area doubles."]
+  expected_rule: "(k*s)^2 -> k * s^2"
+  expected_topic_prefix: "geometry"
+  accept_aliases:
+    [
+      "scaling sides by k scales area by k",
+      "area scales linearly",
+      "forgot area scales by k^2",
+    ]

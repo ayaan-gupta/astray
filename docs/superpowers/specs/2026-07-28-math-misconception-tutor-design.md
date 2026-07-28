@@ -259,6 +259,30 @@ setup. When SymPy can't check the domain, `verified_by_sympy` is `false`, the co
 and the UI does not present the diagnosis with the same certainty. This is the honest mitigation for
 the open-domain choice, not a claim that open-domain is fully solved.
 
+### SymPy is an untrusted-input boundary
+
+Discovered during implementation, and corrected: **`sympy.parse_expr` calls Python's `eval`.** With
+the naive implementation this spec originally implied, `__import__('os').system(...)` executed and
+`().__class__.__bases__[0]` returned `<class 'object'>` — both reproduced, not theorized. The
+expressions reaching the parser are emitted by a model whose prompt carries untrusted student text,
+so a prompt-injected submission is a plausible path to them.
+
+Two layers, because a filter alone is not enough:
+
+1. **A character allow-list before parsing.** Banning quotes removes every string-literal vector,
+   banning brackets removes subscripting, banning dot-before-letter removes attribute chains, and
+   dunder names are rejected outright. Adversarial review — unicode homoglyphs, fullwidth digits,
+   hex escapes, RTL overrides, comment smuggling, `lambda`, walrus, whitespace-split dunders,
+   `globals()` — found no bypass.
+2. **A hard wall-clock bound in a killable process.** The allow-list cannot stop resource
+   exhaustion: `2**2**2**2**2**2` is 16 allow-listed characters that never return, and
+   `factorial(2000000)` burns minutes of CPU. Expression-shape heuristics lose this game; a
+   process-level timeout ends it, and incidentally contains any allow-list bypass still unfound.
+
+The related constraint that keeps this surface small: **no LaTeX parsing.** SymPy's LaTeX parser
+needs the `antlr` runtime, so the model is instructed to emit SymPy syntax (`**`, not `^`, no
+backslash commands) and LaTeX input is rejected by the allow-list rather than parsed.
+
 ## 7. Taxonomy canonicalization
 
 Free-text diagnoses cannot be aggregated — "other students make this error" needs stable identity.
