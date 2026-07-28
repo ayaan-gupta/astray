@@ -11,6 +11,7 @@ Usage: uv run python -m evals.diagnosis.run [--model deepseek-v4-pro] [--case ID
 
 import argparse
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -50,21 +51,40 @@ def load_cases(path: Path) -> list[EvalCase]:
     return [EvalCase.model_validate(entry) for entry in raw]
 
 
+_MIN_DISCRIMINATIVE_TOKENS = 3
+
+
 def _token_overlap(a: str, b: str) -> float:
     """Fraction of the smaller token set shared between ``a`` and ``b``.
 
-    Deliberately loose (this is the "does it also share plain English words" fallback
-    match, behind exact-canonical and alias matching), and deliberately fragile in one
-    specific way worth knowing about: because the denominator is ``min(len(ta), len(tb))``
-    rather than the union, a short phrase (one or two tokens after the length>2 filter --
-    several ``expected_rule`` strings in cases.yaml are this short, e.g. the single-token
-    ``-(a+b) -> -a + b``) can be fully "matched" by a got-string that happens to repeat
-    that one token while describing a completely different error. See the eval harness
-    report for a worked false-positive example found while building this file.
+    This is the loosest of ``score_case``'s three match routes -- the "do these also share
+    plain English words" fallback, behind exact-canonical and alias matching -- and it is
+    guarded against a false-positive failure mode confirmed while building this harness:
+    8 of the 20 ``expected_rule`` strings in cases.yaml (``negative-distribute``,
+    ``cancel-across-sum``, ``power-of-power``, ``single-root``, ``divide-by-variable``,
+    ``zero-product-misuse``, ``like-terms``, ``product-rule``) reduce to two or fewer
+    tokens once punctuation and short filler words are filtered out -- e.g.
+    ``-(a+b) -> -a + b`` reduces to just ``{"-(a+b)"}``. With a ``min(len(ta), len(tb))``
+    denominator, a 1-token reference set is "fully matched" (ratio 1.0) by any ``got``
+    string that happens to repeat that one token while describing a completely different
+    error: a diagnosis for ``cancel-across-sum`` that explicitly names an unrelated decimal
+    place-value mistake, and only incidentally quotes ``(a+b)/b`` while disclaiming it,
+    scored as a pass before this guard existed (see ``tests/test_eval_harness.py``).
+    ``canonicalize_rule`` already handles legitimate variable renames for these same short
+    rules (``canonicalize_rule("(a+b)/b -> a") == canonicalize_rule("(p+q)/q -> p")``), so
+    the ratio route contributed no legitimate coverage there -- refusing to score below
+    ``_MIN_DISCRIMINATIVE_TOKENS`` costs nothing real.
+
+    ``a`` is always the "reference" string at each call site (``expected_rule`` for
+    ``overlap_match``, an alias for ``alias_match``'s ratio fallback), so this guard also
+    zeroes the ratio fallback for the three curated aliases that are themselves only two
+    tokens (``"2ab missing"``, ``"product of derivatives"``, ``"quotient of derivatives"``)
+    -- their substring check (``alias.lower() in got.lower()``), their primary match path,
+    is untouched.
     """
     ta = {t for t in a.lower().replace("->", " ").split() if len(t) > 2}
     tb = {t for t in b.lower().replace("->", " ").split() if len(t) > 2}
-    if not ta or not tb:
+    if len(ta) < _MIN_DISCRIMINATIVE_TOKENS or not tb:
         return 0.0
     return len(ta & tb) / min(len(ta), len(tb))
 
@@ -136,12 +156,24 @@ def _build_client() -> DeepSeekClient:
     )
 
 
-async def main() -> int:
+async def main(
+    argv: list[str] | None = None,
+    *,
+    client_factory: Callable[[], DeepSeekClient] | None = None,
+) -> int:
+    """Run the eval. ``argv``/``client_factory`` exist so ``tests/test_eval_harness.py`` can
+    drive this CLI (unknown ``--case``, the ``LlmError``-continues-and-reports path, the
+    ``regressed:`` summary line) against a fake transport, entirely offline -- real usage
+    (``python -m evals.diagnosis.run``) passes neither and behaves exactly as before:
+    ``argv=None`` falls back to ``sys.argv`` (standard ``argparse`` behavior) and
+    ``client_factory=None`` falls back to ``_build_client``, the real ``Settings``-backed,
+    ``FAKE_LLM``-refusing constructor.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="deepseek-v4-pro", help="model id to diagnose with")
     parser.add_argument("--case", default=None, help="run only this case id")
     parser.add_argument("--cases", default=_DEFAULT_CASES, type=Path, help="path to cases.yaml")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     cases = load_cases(args.cases)
     if args.case:
@@ -150,7 +182,7 @@ async def main() -> int:
             print(f"no case with id {args.case!r} in {args.cases}")
             return 1
 
-    client = _build_client()
+    client = (client_factory or _build_client)()
     scores: list[CaseScore] = []
     total_cost = 0.0
 

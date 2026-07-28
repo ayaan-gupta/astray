@@ -80,14 +80,24 @@
   steps: ["x - 2 = 6", "x = 8"]
   expected_rule: "(x-a)(x-b) = c -> x-a = c"
   expected_topic_prefix: "algebra"
-  accept_aliases: ["zero product property applied to nonzero"]
+  accept_aliases:
+    [
+      "zero product property applied to nonzero",
+      "set a factor equal to the constant instead of zero",
+      "zero product rule only applies when the product is zero",
+    ]
 
 - id: transposition-sign
   problem: "Solve x + 5 = 9"
   steps: ["x = 9 + 5", "x = 14"]
   expected_rule: "moved a term across = without changing its sign"
   expected_topic_prefix: "algebra"
-  accept_aliases: ["sign error when transposing"]
+  accept_aliases:
+    [
+      "sign error when transposing",
+      "kept the same sign instead of negating",
+      "kept the same sign when moving a term",
+    ]
 
 - id: like-terms
   problem: "Simplify x + x^2"
