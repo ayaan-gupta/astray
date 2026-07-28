@@ -694,6 +694,68 @@ def test_photo_upload_succeeds_when_vision_enabled(tmp_path):
     assert body["needs_review"] is False
 
 
+def test_photo_upload_records_the_gemini_call_in_the_ledger(tmp_path):
+    """ingest_photo's LlmCallMeta used to be discarded (`submission, _meta =
+    await ingest_photo(...)`), so the Gemini transcription call's cost was
+    recorded nowhere -- the same token-ledger-constraint violation flagged as
+    Important for the taxonomy call. It must land as its own run_artifacts
+    row, with the real token counts and cost, same as any other billable
+    call."""
+    from server.store import repo as repo_module
+    from server.store.db import connect as connect_module
+
+    async def gemini_handler(request: httpx.Request) -> httpx.Response:
+        payload = {
+            "problem": "Solve (x+3)^2 = 25",
+            "steps": ["x^2 + 9 = 25", "x = 4"],
+            "confidence": 0.97,
+            "unreadable": [],
+        }
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{"content": {"parts": [{"text": json.dumps(payload)}]}}],
+                "usageMetadata": {"promptTokenCount": 123, "candidatesTokenCount": 45},
+            },
+        )
+
+    db_path = tmp_path / "t.db"
+    settings = Settings(
+        _env_file=None,
+        deepseek_api_key="sk-test",
+        gemini_api_key="AQ.test",
+        db_path=db_path,
+        media_root=tmp_path / "media",
+    )
+    app = create_app(
+        settings=settings,
+        client_factory=lambda: DeepSeekClient("sk-test", transport=httpx.MockTransport(_handler)),
+        vision_factory=lambda: GeminiVision(
+            "AQ.test", transport=httpx.MockTransport(gemini_handler)
+        ),
+    )
+
+    with TestClient(app) as c:
+        sid = c.post("/api/sessions", json={"handle": "a", "problem": "p", "work": "w"}).json()[
+            "session_id"
+        ]
+        r = c.post(f"/api/sessions/{sid}/photo", files={"file": ("w.png", b"\x89PNG", "image/png")})
+        assert r.status_code == 200
+
+    verify_conn = connect_module(db_path)
+    try:
+        artifacts = repo_module.list_artifacts(verify_conn, sid)
+    finally:
+        verify_conn.close()
+
+    assert [a["stage"] for a in artifacts] == ["s0_ingest"]
+    row = artifacts[0]
+    assert row["prompt_tokens"] == 123
+    assert row["completion_tokens"] == 45
+    assert row["cost_usd"] > 0
+    assert row["model"] == "gemini-3.5-flash-lite"
+
+
 def test_oversized_upload_rejection_carries_cors_headers(client):
     """MaxBodySizeMiddleware's own 413 must still pass through CORSMiddleware --
     otherwise a browser at the app's configured origin sees an opaque network

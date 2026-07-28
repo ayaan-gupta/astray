@@ -83,7 +83,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.charter.chain import Chain, ProgressEvent
-from server.charter.contracts import StudentSubmission
+from server.charter.contracts import StageName, StudentSubmission
 from server.charter.stages.s0_ingest import ingest_photo, ingest_typed, needs_review
 from server.config import Settings, get_settings
 from server.deps import build_llm_client, build_vision
@@ -298,7 +298,7 @@ def create_app(
                 status_code=413, detail=f"image too large (max {MAX_IMAGE_BYTES} bytes)"
             )
         try:
-            submission, _meta = await ingest_photo(
+            submission, meta = await ingest_photo(
                 request.app.state.vision, data, file.content_type or "image/png"
             )
         except VisionUnavailable as exc:
@@ -314,6 +314,17 @@ def create_app(
                 # which this app has no way to sanitize -- never forward it.
                 detail = _GENERIC_VISION_ERROR
             raise HTTPException(status_code=503, detail=detail) from exc
+        # The Gemini transcription call is billable like any other LLM call -- it must
+        # land in the same run_artifacts ledger the diagnose/taxonomy calls do, not be
+        # discarded. This is the only s0_ingest artifact a photo-input session gets
+        # (typed input never calls a model), so it is its own row per upload.
+        repo.record_artifact(
+            conn_of(request),
+            session_id=session_id,
+            stage=StageName.INGEST,
+            payload=submission.model_dump(),
+            meta=meta,
+        )
         return {
             "transcription": submission.model_dump(),
             "needs_review": needs_review(submission),
