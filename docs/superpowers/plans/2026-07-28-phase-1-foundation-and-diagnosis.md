@@ -428,18 +428,28 @@ def test_pro_cost_with_cache_hits():
 
 
 def test_flash_cost_no_cache():
+    # (1000 * 0.14 + 1000 * 0.28) / 1e6 = 420 / 1e6. Assert the literal, not the
+    # formula: re-typing the rates here would hide a wrong rate in RATES.
     got = cost_usd("deepseek-v4-flash", prompt_tokens=1000, completion_tokens=1000)
-    assert got == pytest.approx((1000 * 0.14 + 1000 * 0.28) / 1_000_000, rel=1e-9)
+    assert got == pytest.approx(0.00042, rel=1e-9)
 
 
 def test_gemini_vision_cost():
+    # (1125 * 0.30 + 83 * 2.50) / 1e6 = (337.5 + 207.5) / 1e6 = 545 / 1e6
     got = cost_usd("gemini-3.5-flash-lite", prompt_tokens=1125, completion_tokens=83)
-    assert got == pytest.approx((1125 * 0.30 + 83 * 2.50) / 1_000_000, rel=1e-9)
+    assert got == pytest.approx(0.000545, rel=1e-9)
 
 
-def test_cached_exceeding_prompt_does_not_go_negative():
+def test_cached_exceeding_prompt_is_capped_at_prompt_tokens():
+    # cached caps to 100, miss becomes 0, so 100 * 0.0028 / 1e6 = 2.8e-7.
+    # Assert the value, not just the sign — `>= 0` passes for any wrong answer.
     got = cost_usd("deepseek-v4-flash", prompt_tokens=100, completion_tokens=0, cached_tokens=500)
-    assert got >= 0.0
+    assert got == pytest.approx(2.8e-7, rel=1e-9)
+
+
+def test_negative_completion_tokens_clamped_to_zero():
+    got = cost_usd("deepseek-v4-flash", prompt_tokens=0, completion_tokens=-1000)
+    assert got == 0.0
 
 
 def test_unknown_model_raises():
@@ -490,9 +500,13 @@ def cost_usd(
     except KeyError as exc:
         raise UnknownModelError(f"no price entry for model {model!r}") from exc
 
+    # Clamp every count. A malformed API response must never produce a negative
+    # ledger entry — that is the exact class of plausible-looking wrong number
+    # this module exists to prevent.
     cached = min(max(cached_tokens, 0), max(prompt_tokens, 0))
     miss = max(prompt_tokens - cached, 0)
-    total = miss * rate.input_miss + cached * rate.input_hit + completion_tokens * rate.output
+    out = max(completion_tokens, 0)
+    total = miss * rate.input_miss + cached * rate.input_hit + out * rate.output
     return total / 1_000_000
 ```
 
