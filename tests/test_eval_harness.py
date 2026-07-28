@@ -9,6 +9,7 @@ from evals.diagnosis import run as eval_run
 from evals.diagnosis.run import load_cases, main, score_case
 from server.charter.contracts import Diagnosis, SympyCheck
 from server.llm.deepseek import DeepSeekClient
+from server.store.taxonomy import canonicalize_rule
 
 CASES = Path("evals/diagnosis/cases.yaml")
 
@@ -234,6 +235,63 @@ def test_alias_ratio_path_residual_still_accepts_a_disclaiming_attack():
     )
     score = score_case(case, _diagnosis(got))
     assert score.rule_match is False
+
+
+# --- Fix round 3: the first live eval run scored 11/20, but every one of the 9 failures
+# was a substantively correct diagnosis, not a model error -- see the report's "Fix round
+# 3" section for the per-case justification from each case's own problem/steps. Two kinds
+# of fix: (1) three cases failed on notation alone (prime vs d/dx, one extra pair of
+# parens, glued vs spaced implicit-multiplication letters); closed with the new
+# alias_canonical_match route (exact canonicalize_rule equality against a curated alias)
+# plus a notational-variant alias for each. (2) two cases' expected_rule was prose,
+# violating buggy_rule's own contract as an explicit rewrite rule; corrected to a rewrite
+# rule derived independently from each case's problem/steps, with the original prose kept
+# as an accept_aliases entry.
+
+
+@pytest.mark.parametrize(
+    ("case_id", "notational_variant"),
+    [
+        ("product-rule", "(f*g)' -> f' * g'"),
+        ("power-rule-exponential", "d/dx (a^x) -> x*a^(x-1)"),
+        ("divide-by-variable", "x^2 = a x -> x = a"),
+    ],
+)
+def test_alias_canonical_route_matches_notational_variant(case_id, notational_variant):
+    case = next(c for c in load_cases(CASES) if c.id == case_id)
+    # Confirm this exercises the new exact route specifically -- not a coincidental
+    # canonical match against expected_rule itself (which would mean the alias wasn't
+    # needed at all).
+    assert canonicalize_rule(notational_variant) != canonicalize_rule(case.expected_rule)
+    score = score_case(case, _diagnosis(notational_variant))
+    assert score.rule_match is True
+    assert score.notes == "alias-canonical"
+
+
+def test_transposition_sign_expected_rule_is_now_a_rewrite_rule():
+    # expected_rule was prose ("moved a term across = without changing its sign"); now a
+    # rewrite rule derived from the case's own problem ("Solve x + 5 = 9") and buggy step
+    # ("x = 9 + 5"): the pattern x + a = b -> x = b + a (correct would be x = b - a). The
+    # original prose is kept as an alias, not discarded.
+    case = next(c for c in load_cases(CASES) if c.id == "transposition-sign")
+    assert case.expected_rule == "x + a = b -> x = b + a"
+    assert "moved a term across = without changing its sign" in case.accept_aliases
+    score = score_case(case, _diagnosis("x + a = b -> x = b + a"))
+    assert score.rule_match is True
+    assert score.notes == "canonical"
+
+
+def test_scale_factor_area_expected_rule_is_now_a_rewrite_rule():
+    # expected_rule was prose ("scaling sides by k scales area by k"); now a rewrite rule
+    # derived from the problem itself (a square's area is side^2, so scaling the side by
+    # k gives (k*s)^2 = k^2*s^2 -- the misconception drops the square on k specifically,
+    # i.e. treats it as k*s^2). Original prose kept as an alias.
+    case = next(c for c in load_cases(CASES) if c.id == "scale-factor-area")
+    assert case.expected_rule == "(k*s)^2 -> k * s^2"
+    assert "scaling sides by k scales area by k" in case.accept_aliases
+    score = score_case(case, _diagnosis("(k*s)^2 -> k * s^2"))
+    assert score.rule_match is True
+    assert score.notes == "canonical"
 
 
 # --- Fix round 1, reviewer Important finding 4: main()'s CLI behavior beyond the brief's

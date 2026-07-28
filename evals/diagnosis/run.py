@@ -106,27 +106,41 @@ def _token_overlap(a: str, b: str) -> float:
 def score_case(case: EvalCase, diagnosis: Diagnosis) -> CaseScore:
     """Score one diagnosis against its labelled case.
 
-    A match counts via any of three routes, from strictest to loosest:
-      1. ``canonical_match`` -- ``canonicalize_rule`` collapses both rules to the same
-         normal form (handles pure variable renaming, e.g. ``(x+3)^2`` vs ``(p+q)^2``).
-      2. ``alias_match`` -- the model's own phrasing either contains a curated alias
-         verbatim, or shares most of an alias's words.
-      3. ``overlap_match`` -- the model's phrasing shares most of the words in
+    A match counts via any of four routes, from strictest to loosest:
+      1. ``canonical_match`` -- ``canonicalize_rule`` collapses both ``expected_rule`` and
+         the diagnosis to the same normal form (handles pure variable renaming, e.g.
+         ``(x+3)^2`` vs ``(p+q)^2``).
+      2. ``alias_canonical_match`` -- same exact ``canonicalize_rule`` equality, but
+         against a curated ``accept_aliases`` entry instead of ``expected_rule`` directly.
+         This is for a *notationally* different but mechanically identical rewrite rule --
+         e.g. prime notation (``(f*g)' -> f' * g'``) for a case whose ``expected_rule``
+         uses ``d/dx``, or an extra pair of parentheses. Exact equality after
+         canonicalization carries none of ``_token_overlap``'s false-positive risk (see
+         Fix round 2), so this route needs no ratio threshold and no discriminative-token
+         guard.
+      3. ``alias_match`` -- the model's own phrasing either contains a curated alias
+         verbatim, or shares most of an alias's words (the loose, ratio-based fallback).
+      4. ``overlap_match`` -- the model's phrasing shares most of the words in
          ``expected_rule`` itself, with no alias involved.
     """
     got = diagnosis.buggy_rule
     canonical_match = canonicalize_rule(got) == canonicalize_rule(case.expected_rule)
+    alias_canonical_match = any(
+        canonicalize_rule(alias) == canonicalize_rule(got) for alias in case.accept_aliases
+    )
     alias_match = any(
         alias.lower() in got.lower() or _token_overlap(alias, got) >= 0.6
         for alias in case.accept_aliases
     )
     overlap_match = _token_overlap(case.expected_rule, got) >= 0.7
 
-    rule_match = canonical_match or alias_match or overlap_match
+    rule_match = canonical_match or alias_canonical_match or alias_match or overlap_match
     topic_match = diagnosis.topic.startswith(case.expected_topic_prefix)
 
     if canonical_match:
         notes = "canonical"
+    elif alias_canonical_match:
+        notes = "alias-canonical"
     elif alias_match:
         notes = "alias"
     elif overlap_match:

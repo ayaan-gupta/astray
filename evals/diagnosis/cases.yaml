@@ -66,7 +66,7 @@
   steps: ["x = 5"]
   expected_rule: "x^2 = cx -> x = c"
   expected_topic_prefix: "algebra"
-  accept_aliases: ["divided by x and lost x=0"]
+  accept_aliases: ["divided by x and lost x=0", "x^2 = c x -> x = c"]
 
 - id: inequality-flip
   problem: "Solve -3x < 9"
@@ -90,10 +90,11 @@
 - id: transposition-sign
   problem: "Solve x + 5 = 9"
   steps: ["x = 9 + 5", "x = 14"]
-  expected_rule: "moved a term across = without changing its sign"
+  expected_rule: "x + a = b -> x = b + a"
   expected_topic_prefix: "algebra"
   accept_aliases:
     [
+      "moved a term across = without changing its sign",
       "sign error when transposing",
       "kept the same sign instead of negating",
       "kept the same sign when moving a term",
@@ -118,7 +119,7 @@
   steps: ["= 2x * cos(x)"]
   expected_rule: "d/dx (f*g) -> f' * g'"
   expected_topic_prefix: "calculus"
-  accept_aliases: ["product of derivatives"]
+  accept_aliases: ["product of derivatives", "(f*g)' -> f' * g'"]
 
 - id: quotient-rule
   problem: "Differentiate x^2 / cos(x)"
@@ -132,7 +133,7 @@
   steps: ["= x * 2^(x-1)"]
   expected_rule: "d/dx a^x -> x*a^(x-1)"
   expected_topic_prefix: "calculus"
-  accept_aliases: ["power rule on an exponential"]
+  accept_aliases: ["power rule on an exponential", "d/dx (a^x) -> x*a^(x-1)"]
 
 - id: trig-distribute
   problem: "Expand sin(a + b)"
@@ -144,6 +145,11 @@
 - id: scale-factor-area
   problem: "A square's sides are doubled. What happens to its area?"
   steps: ["The area doubles."]
-  expected_rule: "scaling sides by k scales area by k"
+  expected_rule: "(k*s)^2 -> k * s^2"
   expected_topic_prefix: "geometry"
-  accept_aliases: ["area scales linearly", "forgot area scales by k^2"]
+  accept_aliases:
+    [
+      "scaling sides by k scales area by k",
+      "area scales linearly",
+      "forgot area scales by k^2",
+    ]
