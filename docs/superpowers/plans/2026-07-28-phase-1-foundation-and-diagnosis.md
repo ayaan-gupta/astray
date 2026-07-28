@@ -360,6 +360,12 @@ class StudentSubmission(BaseModel):
     source: Literal["typed", "photo"] = "typed"
     transcription_confidence: float | None = None
     student_corrected: bool = False
+    # Lines the vision model could not read. A non-empty list forces the review
+    # gate regardless of the confidence the model claims for itself — otherwise a
+    # photo with one blurry step and a self-reported 0.9 sails through, and the
+    # diagnosis stage analyses a mistake the student never made. Carried through
+    # so the UI can name the unclear line instead of asking for the whole photo again.
+    unreadable: list[str] = Field(default_factory=list)
 
 
 class SympyCheck(BaseModel):
