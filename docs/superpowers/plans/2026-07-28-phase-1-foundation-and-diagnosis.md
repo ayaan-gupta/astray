@@ -23,6 +23,16 @@ Every task's requirements implicitly include this section.
 - Secrets live only in `server/.env` (gitignored). Never logged, never in artifacts, never returned by the API.
 - Cache-friendly prompting: the shared preamble goes FIRST in every message list (cache hits are ~50× cheaper).
 - Student-supplied text is untrusted. It MUST be wrapped in labeled delimiters in every prompt.
+- **SymPy's `parse_expr` calls Python's `eval`.** This was not theoretical: running the original
+  Task 7 sample code, `__import__('os').system(...)` executed for real and
+  `().__class__.__bases__[0]` returned `<class 'object'>`. The strings reaching it come from a
+  model whose prompt contains untrusted student text, so this is a live boundary, not a
+  hypothetical one. Any expression parsed from model output MUST pass a character allow-list that
+  bans quotes (kills every string-literal vector), brackets (kills subscripting), dot-before-letter
+  (kills attribute chains), and dunder names — AND run under a hard wall-clock bound in a process
+  that can be killed, since an allow-listed expression can still hang forever (`2**2**2**2**2**2`
+  is 16 characters and never returns) or burn minutes of CPU (`factorial(2000000)`). Defense in
+  depth: the allow-list is the filter, the process bound is the backstop.
 - Line length 100. Format/lint with `ruff`.
 
 ---
