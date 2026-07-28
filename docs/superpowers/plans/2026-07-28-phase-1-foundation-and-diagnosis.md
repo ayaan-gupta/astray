@@ -1399,7 +1399,15 @@ This is what makes the diagnosis anchored rather than self-reported. LaTeX parsi
 
 **Interfaces:**
 - Consumes: `server.charter.contracts.SympyCheck`
-- Produces: `run_check(check: SympyCheck) -> CheckResult` where `CheckResult` is a Pydantic model with `verified: bool`, `detail: str`. Never raises — malformed input returns `verified=False` with the reason in `detail`.
+- Produces: `run_check(check: SympyCheck) -> CheckResult` where `CheckResult` is a Pydantic model
+  with `verified: bool`, `detail: str`. Never raises — malformed input returns `verified=False`
+  with the reason in `detail`, and so does a timeout.
+- Also produces `async run_check_async(check: SympyCheck) -> CheckResult`. **Async callers
+  (Task 11, Task 12, Task 13) MUST use this one.** The check runs in a killable subprocess with a
+  wall-clock bound, because an allow-listed expression can still hang forever; `run_check` blocks
+  its calling thread for up to that timeout, so calling it inline from a coroutine stalls every
+  other request on the worker. `run_check_async` wraps it in `asyncio.to_thread`. Budget ~0.3s of
+  process-spawn overhead per call — paid once per check, not per parsed field.
 
 - [ ] **Step 1: Write the failing test**
 
