@@ -108,6 +108,61 @@ def test_set_session_status(tmp_path):
     assert repo.get_session(conn, sid)["status"] == "diagnosed"
 
 
+def test_try_start_session_succeeds_once_then_fails(tmp_path):
+    """The compare-and-swap that closes the /stream concurrency race (see
+    server/app.py and chain.py): the first call against a freshly-created
+    session transitions it and reports success; a second call against the
+    same (now in_progress) session must not transition it again and must
+    report failure. This is the exact rowcount behavior (1, then 0) the
+    reviewer verified through _SerializedConnection/_MaterializedRows."""
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    assert repo.try_start_session(conn, sid) is True
+    assert repo.get_session(conn, sid)["status"] == "in_progress"
+
+    assert repo.try_start_session(conn, sid) is False
+    assert repo.get_session(conn, sid)["status"] == "in_progress"
+
+
+def test_try_start_session_fails_on_terminal_status(tmp_path):
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    repo.set_session_status(conn, sid, "diagnosed")
+    assert repo.try_start_session(conn, sid) is False
+    assert repo.get_session(conn, sid)["status"] == "diagnosed"
+
+
+def test_try_start_session_race_from_many_threads_has_exactly_one_winner(tmp_path):
+    """Exercises the actual concurrency this function exists for: many
+    threads racing try_start_session against the same freshly-created session
+    must produce exactly one winner, never zero and never more than one."""
+    conn = _conn(tmp_path)
+    sid = repo.create_session(
+        conn, handle="a", submission=StudentSubmission(problem="p", source="typed")
+    )
+    results: list[bool] = []
+    lock = threading.Lock()
+
+    def attempt() -> None:
+        won = repo.try_start_session(conn, sid)
+        with lock:
+            results.append(won)
+
+    threads = [threading.Thread(target=attempt) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert results.count(True) == 1
+    assert results.count(False) == 19
+    assert repo.get_session(conn, sid)["status"] == "in_progress"
+
+
 def test_deleting_session_cascades_to_artifacts_and_diagnoses(tmp_path):
     """FK ON DELETE CASCADE actually fires, not just declared."""
     conn = _conn(tmp_path)

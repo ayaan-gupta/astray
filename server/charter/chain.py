@@ -10,18 +10,31 @@ this into a full ``run`` that continues through s2-s8 and rendering.
 
 Design notes, answering the questions this module invites:
 
-* **Failure mid-run vs. a crash vs. never started.** ``sessions.status`` is
-  set to ``in_progress`` *before* the diagnose stage's LLM call, not just on
-  the way out. Without this, a process killed mid-call (which legitimately
+* **Failure mid-run vs. a crash vs. never started.** ``sessions.status`` must
+  already be ``in_progress`` *before* the diagnose stage's LLM call, not just
+  on the way out -- otherwise a process killed mid-call (which legitimately
   runs tens of seconds against a reasoning model) leaves the row at
-  ``created`` -- bit-for-bit identical to a session nobody ever picked up,
+  ``created``, bit-for-bit identical to a session nobody ever picked up,
   since ``created`` is also the row's initial value from ``create_session``.
-  With it, the three cases are distinguishable by reading ``sessions.status``
-  alone: ``created`` means genuinely never started, ``in_progress`` means
-  started and either still running or dead mid-run (Phase 1 has no
-  heartbeat/staleness column to tell those two apart yet -- see the note
-  below), and ``failed``/``diagnosed``/``needs_clarification`` are the
-  terminal outcomes. Any ``LlmError`` (or subclass, e.g.
+  That transition is the caller's responsibility, made via
+  ``repo.try_start_session``'s compare-and-swap (``UPDATE ... WHERE status =
+  'created'``), *before* ``run_diagnosis`` is ever invoked -- not a write this
+  method performs itself. It has to happen there rather than here: the
+  natural caller (``server/app.py``'s ``/stream`` route) hands this generator
+  to ``asyncio.create_task``, which defers the generator's first line to the
+  next event-loop iteration -- so a write at the top of this method would
+  leave a window where a second concurrent request reads the same
+  pre-transition ``created`` status and also starts a run. Doing the
+  compare-and-swap synchronously, before the task is even created, closes
+  that window; this method repeating the write afterward would be redundant
+  at best (the route already made it true) and, worse, would reintroduce a
+  plain write for any caller that bypasses the route's CAS. With the
+  transition already made, the three cases are distinguishable by reading
+  ``sessions.status`` alone: ``created`` means genuinely never started,
+  ``in_progress`` means started and either still running or dead mid-run
+  (Phase 1 has no heartbeat/staleness column to tell those two apart yet --
+  see the note below), and ``failed``/``diagnosed``/``needs_clarification``
+  are the terminal outcomes. Any ``LlmError`` (or subclass, e.g.
   ``SchemaRetryExhausted``) raised by the diagnose stage is caught here, the
   session status is set to ``failed``, an ``error`` ``ProgressEvent`` is
   yielded, and the generator returns -- no ``done`` event follows a failure.
@@ -124,12 +137,14 @@ class Chain:
         ``failed`` and yields a terminal ``error`` event -- no ``done``
         event follows. On success, always reaches a terminal
         ``diagnosed``/``needs_clarification`` status (taxonomy resolution
-        never raises) and yields ``diagnosis_ready`` then ``done``. Marks the
-        session ``in_progress`` before the diagnose call so a process killed
-        mid-call is distinguishable from one never started (see module
-        docstring).
+        never raises) and yields ``diagnosis_ready`` then ``done``.
+
+        Does NOT mark the session ``in_progress`` itself -- see the module
+        docstring for why that transition must be the caller's
+        compare-and-swap, made before this generator is ever handed to
+        ``asyncio.create_task``, rather than a write at the top of this
+        method.
         """
-        repo.set_session_status(self._conn, session_id, "in_progress")
         yield ProgressEvent(type="stage_started", stage=StageName.DIAGNOSE)
 
         try:

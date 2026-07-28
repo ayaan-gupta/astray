@@ -23,16 +23,26 @@ Two structural decisions here are not obvious from the route bodies alone:
   connection mid-run would leave the session stuck at ``in_progress`` forever --
   indistinguishable from a genuinely crashed process (see chain.py's module
   docstring on that ambiguity).
-* **``GET .../stream`` is not safely repeatable, so it checks status first.** A
-  plain ``EventSource`` (the natural frontend client for SSE) auto-reconnects on
-  any transient network hiccup by re-issuing the exact same ``GET``. Without a
-  guard, that would either race a second ``run_diagnosis`` against the one
-  already writing this session's rows (``status == "in_progress"``), or silently
-  re-run -- and re-bill -- the whole diagnose stage for a session that already
-  reached a terminal status. The route rejects a reconnect while a run is
-  already in flight (``409``) and replays the persisted terminal result instead
-  of re-running one that already finished; only a session still at ``created``
-  actually starts ``run_diagnosis``.
+* **``GET .../stream`` is not safely repeatable, so it claims the session with a
+  compare-and-swap, not a read-then-check.** A plain ``EventSource`` (the natural
+  frontend client for SSE) auto-reconnects on any transient network hiccup by
+  re-issuing the exact same ``GET`` -- and multiple concurrent requests for the
+  same session are also a real, not just theoretical, shape (a double-clicked
+  button, two open tabs). Reading ``status`` and then separately deciding whether
+  to start a run leaves a window between the two for a second concurrent request
+  to read the identical pre-transition status and also start one -- especially
+  since the run itself starts via ``asyncio.create_task``, which defers
+  ``run_diagnosis``'s first line to the next event-loop iteration, giving a
+  same-tick request ample room to land in exactly that window. ``repo.
+  try_start_session`` closes it: ``UPDATE sessions SET status = 'in_progress'
+  WHERE id = ? AND status = 'created'`` performs the check and the transition as
+  one atomic statement, so at most one concurrent caller for a given session ever
+  observes success (``rowcount == 1``) -- everyone else observes ``0`` and must
+  not start a run. A loser then re-reads the (now up to date) status to tell
+  "already running" (``409``) apart from "already terminal" (replay the
+  persisted result instead of re-running -- and re-billing -- the whole diagnose
+  stage). Only the single winner of the compare-and-swap actually starts
+  ``run_diagnosis``.
 * **Shutdown drains ``background_tasks`` before closing the client/connection.**
   Because the diagnosis run is deliberately decoupled from the request (previous
   bullet), it is *also* invisible to uvicorn's normal connection-draining on
@@ -373,20 +383,34 @@ def create_app(
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")
 
-        status = row["status"]
-        if status == "in_progress":
-            # A run is already writing this session's rows (by this handler, or one
-            # from a moment ago) -- Chain has no notion of "already running" beyond
-            # this status column, so starting a second run here would race the
-            # first one's writes and double-bill the LLM call. Phase 1 also has no
-            # way to distinguish "still running" from "crashed mid-run" (see
-            # chain.py's module docstring), so a genuinely stuck session surfaces
-            # as this same 409 until it's investigated by other means.
-            raise HTTPException(
-                status_code=409, detail="diagnosis already in progress for this session"
-            )
-        if status != "created":
-            return _replay_terminal_state(connection, session_id, status)
+        # A compare-and-swap (UPDATE ... WHERE status = 'created'), not a
+        # read-then-write: reading `row["status"]` above and separately checking
+        # it against "created" leaves a window between that read and starting the
+        # run for a second concurrent request to read the very same
+        # pre-transition status and also decide it's safe to start -- especially
+        # since the run itself starts via asyncio.create_task, which defers its
+        # first line to the next event-loop iteration, giving a same-tick
+        # concurrent request ample room to land in that window. try_start_session
+        # closes it: the check and the transition are one atomic statement, so at
+        # most one concurrent caller for a given session ever observes success.
+        if not repo.try_start_session(connection, session_id):
+            # Lost the compare-and-swap: this session was not `created` at the
+            # instant of the UPDATE, so starting a run here would race whoever
+            # already claimed it (this handler moments ago, or a concurrent one in
+            # the very same event-loop tick) and double-bill the LLM call. Re-read
+            # to tell "already running" apart from "already terminal" -- it is the
+            # CAS above, not this follow-up read, that closes the race, so this
+            # read merely has to report correctly, not itself be race-free.
+            current = repo.get_session(connection, session_id)["status"]
+            if current == "in_progress":
+                # Phase 1 has no way to distinguish "still running" from "crashed
+                # mid-run" (see chain.py's module docstring), so a genuinely stuck
+                # session surfaces as this same 409 until it's investigated by
+                # other means.
+                raise HTTPException(
+                    status_code=409, detail="diagnosis already in progress for this session"
+                )
+            return _replay_terminal_state(connection, session_id, current)
 
         submission = StudentSubmission.model_validate_json(row["student_work_json"])
         chain = Chain(connection, request.app.state.client, settings=request.app.state.settings)

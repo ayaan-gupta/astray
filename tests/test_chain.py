@@ -232,13 +232,22 @@ async def test_llm_failure_leaves_no_artifact_or_diagnosis_rows(tmp_path):
 
 async def test_session_marked_in_progress_before_diagnose_call(tmp_path):
     """A process killed mid-diagnose-call must be distinguishable from a
-    session nobody ever picked up: sessions.status must already be
-    ``in_progress`` by the time the first (stage_started) event is observed,
-    not just at the end of a successful run."""
+    session nobody ever picked up. Marking ``in_progress`` is the caller's
+    compare-and-swap (``repo.try_start_session``), made before
+    ``run_diagnosis`` is ever invoked -- not a write ``Chain`` performs itself
+    (see chain.py's module docstring for why: a write at the top of this
+    generator would be deferred, via ``asyncio.create_task``, to the next
+    event-loop iteration, reopening the exact race the compare-and-swap
+    exists to close). This pins that contract: the caller transitions the
+    session first, and ``run_diagnosis`` neither depends on doing that write
+    itself nor redundantly repeats it."""
     conn = connect(tmp_path / "t.db")
     seed(conn)
     sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
     assert repo.get_session(conn, sid)["status"] == "created"
+
+    assert repo.try_start_session(conn, sid) is True
+    assert repo.get_session(conn, sid)["status"] == "in_progress"
 
     chain = Chain(conn, _client(), settings=_settings())
     events = chain.run_diagnosis(sid, SUBMISSION)

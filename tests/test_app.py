@@ -325,6 +325,171 @@ def test_second_stream_call_while_in_progress_returns_409(tmp_path):
         assert c.get(f"/api/sessions/{sid}").json()["status"] == "diagnosed"
 
 
+async def test_concurrent_stream_requests_only_one_wins_the_race(tmp_path):
+    """Reproduces the reviewer's finding directly: the old read-then-check guard
+    (read `status`, then `asyncio.create_task(produce())`, which defers the
+    `in_progress` write inside chain.py to the next event-loop iteration) let
+    several concurrent GETs for the same session all observe `status ==
+    "created"` and all start a run. TestClient is strictly sequential and could
+    never exercise this, so this drives the raw ASGI app directly (matching the
+    shape of concurrent requests a real server like uvicorn hands the app) and
+    fires several GETs at literally the same time via asyncio.gather. With the
+    compare-and-swap fix, exactly one must win (200, one billable diagnose call,
+    one `diagnoses` row) and every other concurrent request must get 409 --
+    never N runs racing each other's writes."""
+    calls = {"diagnose": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body.get("tools"):
+            args = json.dumps({"same_as_id": None, "new_slug": "fd", "reasoning": "n"})
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "c",
+                                        "type": "function",
+                                        "function": {"name": "emit_answer", "arguments": args},
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+        calls["diagnose"] += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(DIAGNOSIS),
+                            "reasoning_content": "r",
+                        },
+                    }
+                ],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+            },
+        )
+
+    db_path = tmp_path / "t.db"
+    settings = Settings(
+        _env_file=None, deepseek_api_key="sk-test", db_path=db_path, media_root=tmp_path / "media"
+    )
+    app = create_app(
+        settings=settings,
+        client_factory=lambda: DeepSeekClient("sk-test", transport=httpx.MockTransport(handler)),
+    )
+
+    def _http_scope(method: str, path: str) -> dict:
+        return {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": [(b"content-type", b"application/json")],
+            "query_string": b"",
+            "raw_path": path.encode(),
+            "http_version": "1.1",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+        }
+
+    async def _call(scope: dict, body: bytes = b"") -> tuple[int, bytes]:
+        sent_request = False
+
+        async def receive():
+            nonlocal sent_request
+            if not sent_request:
+                sent_request = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            await asyncio.Event().wait()  # no further messages; response completes on its own
+
+        events: list[dict] = []
+
+        async def send(message: dict) -> None:
+            events.append(message)
+
+        await app(scope, receive, send)
+        status = next(e["status"] for e in events if e["type"] == "http.response.start")
+        response_body = b"".join(e["body"] for e in events if e["type"] == "http.response.body")
+        return status, response_body
+
+    startup_complete = asyncio.Event()
+    shutdown_requested = asyncio.Event()
+
+    async def lifespan_receive():
+        if not startup_complete.is_set():
+            return {"type": "lifespan.startup"}
+        await shutdown_requested.wait()
+        return {"type": "lifespan.shutdown"}
+
+    async def lifespan_send(message: dict) -> None:
+        if message["type"] == "lifespan.startup.complete":
+            startup_complete.set()
+
+    lifespan_task = asyncio.create_task(app({"type": "lifespan"}, lifespan_receive, lifespan_send))
+    await startup_complete.wait()
+    try:
+        _created_status, created_body = await _call(
+            _http_scope("POST", "/api/sessions"),
+            json.dumps(
+                {"handle": "a", "problem": "Solve (x+3)^2 = 25", "work": "x^2+9=25"}
+            ).encode(),
+        )
+        session_id = json.loads(created_body)["session_id"]
+
+        concurrency = 5
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    _call(_http_scope("GET", f"/api/sessions/{session_id}/stream"))
+                    for _ in range(concurrency)
+                )
+            ),
+            timeout=10,
+        )
+        statuses = [status for status, _ in results]
+        assert statuses.count(200) == 1, f"expected exactly one 200, got statuses={statuses}"
+        assert statuses.count(409) == concurrency - 1
+
+        row_body = created_body
+        for _ in range(40):  # poll until the winning background run finishes
+            _status, row_body = await _call(_http_scope("GET", f"/api/sessions/{session_id}"))
+            if json.loads(row_body)["status"] != "in_progress":
+                break
+            await asyncio.sleep(0.05)
+        assert json.loads(row_body)["status"] == "diagnosed"
+        assert calls["diagnose"] == 1
+
+        from server.store.db import connect as connect_module
+
+        verify_conn = connect_module(db_path)
+        try:
+            diagnoses_count = verify_conn.execute(
+                "SELECT COUNT(*) FROM diagnoses WHERE session_id = ?", (session_id,)
+            ).fetchone()[0]
+        finally:
+            verify_conn.close()
+        assert diagnoses_count == 1
+    finally:
+        shutdown_requested.set()
+        await lifespan_task
+
+
 def test_non_llm_error_during_diagnosis_marks_session_failed_not_wedged(tmp_path, monkeypatch):
     """A non-LlmError exception during diagnosis (a genuine bug, or e.g. an
     UnknownModelError from a typo'd model id) must not wedge the session at

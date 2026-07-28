@@ -31,6 +31,30 @@ def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -
     conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
 
 
+def try_start_session(conn: sqlite3.Connection, session_id: str) -> bool:
+    """Atomically transition ``session_id`` from ``created`` to ``in_progress``.
+
+    A compare-and-swap, not a read-then-write: the transition and the check that
+    it is legal to make happen in the same statement, so there is no window
+    between "read the status" and "write in_progress" for a second concurrent
+    caller to read the same pre-transition status and also decide it may start a
+    run. ``UPDATE ... WHERE status = 'created'`` either matches this session's one
+    row (it was still ``created``) or matches nothing (some other caller already
+    won the race, or it was already terminal) -- ``rowcount`` distinguishes the
+    two outcomes without a second query.
+
+    Returns ``True`` if this call performed the transition (the caller may now
+    safely start a run), ``False`` if it did not (the session was already
+    ``in_progress`` or a terminal status -- the caller must not start a run and
+    should inspect the current status to decide between a 409 and a replay).
+    """
+    cur = conn.execute(
+        "UPDATE sessions SET status = 'in_progress' WHERE id = ? AND status = 'created'",
+        (session_id,),
+    )
+    return cur.rowcount == 1
+
+
 def record_artifact(
     conn: sqlite3.Connection,
     *,
