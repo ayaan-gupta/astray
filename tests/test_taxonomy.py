@@ -133,17 +133,55 @@ async def test_llm_mints_new_entry(tmp_path):
     )
 
 
-async def test_duplicate_slug_reuses_existing_row(tmp_path):
+async def test_proposed_slug_colliding_with_existing_mints_distinct_row(tmp_path):
+    """`same_as_id` and `new_slug` are distinct channels on `MatchDecision`:
+    `same_as_id` is the model asserting identity ("this is row N"); `new_slug`
+    is the model asserting novelty ("this is new, call it X"). A decision that
+    sets `new_slug` is, by construction, saying *not the same* — so a name
+    collision on that channel is not evidence of identity and must not be
+    treated as one.
+
+    This used to be `test_duplicate_slug_reuses_existing_row`, and it asserted
+    the opposite: that naming an existing slug on the `new_slug` channel
+    reuses that row outright, with no check against what the rule actually
+    says. That was the same vulnerability class as the slug-truncation and
+    operator-collision bugs above, just reached by an LLM naming choice
+    instead of `_slugify` collapsing two different inputs — a slug string
+    overriding the content check. `"something"` canonicalizes to `"something"`;
+    the real `freshmans-dream` row canonicalizes to `"(v+v)^#->v^#+v^#"`.
+    Nothing here is evidence they are the same misconception, so the correct
+    behavior is to mint a new, disambiguated row and leave the existing one
+    untouched — which is what this test now asserts.
+    """
     conn = connect(tmp_path / "t.db")
     seed(conn)
+    existing = conn.execute(
+        "SELECT id, canonical_rule, canonical_statement FROM misconceptions "
+        "WHERE slug = 'freshmans-dream'"
+    ).fetchone()
+
     client = _strict_client(
         {"same_as_id": None, "new_slug": "freshmans-dream", "reasoning": "collides"}
     )
     got = await taxonomy.resolve_misconception(
         conn, client, diagnosis=_diagnosis("something"), model="deepseek-v4-flash"
     )
-    row = conn.execute("SELECT slug FROM misconceptions WHERE id = ?", (got,)).fetchone()
-    assert row["slug"] == "freshmans-dream"
+
+    assert got != existing["id"], "a new_slug naming an unrelated row must not merge into it"
+    new_row = conn.execute(
+        "SELECT slug, canonical_rule FROM misconceptions WHERE id = ?", (got,)
+    ).fetchone()
+    assert new_row["slug"] != "freshmans-dream"
+    assert new_row["slug"].startswith("freshmans-dream")
+    assert new_row["canonical_rule"] == taxonomy.canonicalize_rule("something")
+
+    # The existing row is untouched by the collision.
+    unchanged = conn.execute(
+        "SELECT canonical_rule, canonical_statement FROM misconceptions WHERE id = ?",
+        (existing["id"],),
+    ).fetchone()
+    assert unchanged["canonical_rule"] == existing["canonical_rule"]
+    assert unchanged["canonical_statement"] == existing["canonical_statement"]
 
 
 async def test_slug_truncation_collision_mints_distinct_rows(tmp_path):
