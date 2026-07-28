@@ -1774,9 +1774,19 @@ def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     # check_same_thread=False is required: FastAPI dispatches `def` routes on a
     # threadpool worker while `async def` routes and startup run on the loop
-    # thread, so one connection is touched from several threads. Safe here
-    # because isolation_level=None autocommits every statement (no interleaved
-    # transactions) and WAL + busy_timeout handle contention.
+    # thread, so one connection is touched from several threads.
+    #
+    # It is NOT sufficient on its own. An earlier draft of this comment claimed
+    # autocommit + WAL + busy_timeout made the shared connection safe; that is
+    # false and was disproved by measurement — 5 threads x 20 writes lost 2-19
+    # rows and raised InterfaceError in 15 of 15 trials. sqlite3.threadsafety==3
+    # describes the SQLite C library's thread mode, not pysqlite's safety when
+    # several threads call execute() on one Connection object; WAL and
+    # busy_timeout govern file locking and transactions, not C-API call safety.
+    # Statement execution must therefore be serialized with a lock, and the lock
+    # must cover cursor-level execution too — conn.cursor().execute() bypasses a
+    # wrapper that only overrides Connection.execute, and reproduces the full
+    # corruption.
     conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
