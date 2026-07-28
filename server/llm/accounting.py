@@ -33,9 +33,10 @@ def cost_usd(
 
     cached = min(max(cached_tokens, 0), max(prompt_tokens, 0))
     miss = max(prompt_tokens - cached, 0)
+    completion = max(completion_tokens, 0)
     total = (
         miss * rate.input_miss
         + cached * rate.input_hit
-        + completion_tokens * rate.output
+        + completion * rate.output
     )
     return total / 1_000_000
