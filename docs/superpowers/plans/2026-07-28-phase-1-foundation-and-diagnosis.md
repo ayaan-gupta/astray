@@ -47,6 +47,7 @@ Every task's requirements implicitly include this section.
 | `server/charter/stages/s0_ingest.py` | Normalize typed/photo input |
 | `server/charter/stages/s1_diagnose.py` | The diagnosis engine |
 | `server/charter/chain.py` | Orchestrator, artifact persistence, progress events |
+| `server/deps.py` | Builds the LLM and vision clients from settings |
 | `server/app.py` | FastAPI routes + SSE |
 | `evals/diagnosis/cases.yaml` | 20 labeled diagnosis cases |
 | `evals/diagnosis/run.py` | Eval harness + scoring |
@@ -1700,7 +1701,12 @@ MIGRATIONS: list[str] = [
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, isolation_level=None)
+    # check_same_thread=False is required: FastAPI dispatches `def` routes on a
+    # threadpool worker while `async def` routes and startup run on the loop
+    # thread, so one connection is touched from several threads. Safe here
+    # because isolation_level=None autocommits every statement (no interleaved
+    # transactions) and WAL + busy_timeout handle contention.
+    conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -2156,12 +2162,17 @@ class MatchDecision(BaseModel):
 def canonicalize_rule(rule: str) -> str:
     """Collapse cosmetic differences so the same error matches across problems.
 
-    Single-letter variables become ``v`` and numerals become ``n``, so
-    ``(x+3)^2 -> x^2+9`` and ``(t+5)^2 -> t^2+25`` share one canonical form.
+    Single-letter variables become ``v`` and numerals become ``#``, so
+    ``(x+3)^2 -> x^2+9`` and ``(t+5)^2 -> t^2+25`` share one canonical form
+    while ``(a+b)^2 -> a^2+b^2`` stays distinct from both.
+
+    The numeral placeholder MUST NOT be a lowercase letter: ``_VAR_RUN``
+    runs afterwards and would re-capture it as a variable, collapsing
+    digits and variables into the same token.
     """
     text = rule.strip().lower()
     text = text.replace("→", "->").replace("=>", "->")
-    text = _NUM.sub("n", text)
+    text = _NUM.sub("#", text)
     text = _VAR_RUN.sub("v", text)
     text = _WS.sub("", text)
     return text
@@ -3229,7 +3240,7 @@ def build_vision(settings: Settings) -> VisionProvider:
 import json
 from collections.abc import Callable
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator

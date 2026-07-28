@@ -21,3 +21,6 @@ media/
 
 # manim
 media_manim/
+
+# subagent-driven-development scratch (ledgers, briefs, review packages)
+.superpowers/
