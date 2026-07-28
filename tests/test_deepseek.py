@@ -58,6 +58,86 @@ async def test_complete_json_parses_and_reports_meta():
     assert meta.cost_usd == pytest.approx(0.00069745, rel=1e-6)
 
 
+async def test_meta_handles_non_dict_usage_without_crashing():
+    """`usage` being present but not a dict (a malformed upstream body, or a
+    proxy/gateway reshaping the response) must not raise a bare AttributeError
+    from an unguarded `.get()` -- it should fall back to zeroed token counts,
+    mirroring the isinstance-guard discipline vision.py's `_text_part` applies
+    to Gemini's response shape."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}}],
+                "usage": ["not", "a", "dict"],
+            },
+        )
+
+    _, meta = await _client(handler).complete_text(
+        messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+    )
+    assert meta.prompt_tokens == 0
+    assert meta.completion_tokens == 0
+    assert meta.cached_tokens == 0
+    assert meta.cost_usd == 0.0
+
+
+async def test_meta_handles_non_dict_prompt_tokens_details_without_crashing():
+    """`usage.prompt_tokens_details` being present but not a dict (this is
+    Gemini's *actual* real shape for the analogous field -- see vision.py's
+    comment on `usageMetadata.promptTokensDetails` being a list, not a dict --
+    a realistic shape for DeepSeek too if a proxy reshapes the body) must not
+    crash; only `cached_tokens` should fall back to 0, the other counts still
+    read normally."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}}],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "prompt_tokens_details": ["not", "a", "dict"],
+                },
+            },
+        )
+
+    _, meta = await _client(handler).complete_text(
+        messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+    )
+    assert meta.prompt_tokens == 10
+    assert meta.completion_tokens == 5
+    assert meta.cached_tokens == 0
+
+
+async def test_meta_handles_non_int_token_counts_without_crashing():
+    """A non-numeric token count (null, a string, a list) must not reach
+    `LlmCallMeta` and raise an uncaught pydantic ValidationError -- it should
+    fall back to 0, same as a missing field would."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}}],
+                "usage": {
+                    "prompt_tokens": None,
+                    "completion_tokens": "not-a-number",
+                    "prompt_tokens_details": {"cached_tokens": []},
+                },
+            },
+        )
+
+    _, meta = await _client(handler).complete_text(
+        messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+    )
+    assert meta.prompt_tokens == 0
+    assert meta.completion_tokens == 0
+    assert meta.cached_tokens == 0
+
+
 async def test_schema_injected_into_prompt():
     seen: list[dict] = []
 

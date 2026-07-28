@@ -123,10 +123,27 @@ class DeepSeekClient:
 
     @staticmethod
     def _meta(body: dict, model: str, elapsed_ms: int, attempts: int) -> LlmCallMeta:
-        usage = body.get("usage") or {}
-        cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+        """Extract token/cost provenance from a decoded response body.
+
+        Every level of ``usage``/``prompt_tokens_details`` is isinstance-guarded before
+        being indexed, mirroring the discipline ``vision.py``'s ``_text_part`` applies to
+        Gemini's response shape -- ``usage`` or ``prompt_tokens_details`` being present but
+        not a dict (a malformed upstream body, or a proxy/gateway reshaping the response)
+        must fall back to an empty mapping rather than raise a bare ``AttributeError`` from
+        an unguarded ``.get()`` on a list or string. The token counts themselves are
+        similarly guarded to a plain ``int``, so a non-numeric value can't reach
+        ``LlmCallMeta`` and raise an uncaught ``ValidationError`` here either.
+        """
+        usage = body.get("usage")
+        usage = usage if isinstance(usage, dict) else {}
+        details = usage.get("prompt_tokens_details")
+        details = details if isinstance(details, dict) else {}
+        cached = details.get("cached_tokens", 0)
+        cached = cached if isinstance(cached, int) else 0
         prompt_tokens = usage.get("prompt_tokens", 0)
+        prompt_tokens = prompt_tokens if isinstance(prompt_tokens, int) else 0
         completion_tokens = usage.get("completion_tokens", 0)
+        completion_tokens = completion_tokens if isinstance(completion_tokens, int) else 0
         message = _message(body)
         return LlmCallMeta(
             model=model,
