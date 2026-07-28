@@ -400,11 +400,23 @@ def create_app(
             except Exception:
                 # Chain's contract is "an LlmError becomes a terminal `error` event,
                 # everything else never raises" (see chain.py) -- this is a last-resort
-                # net so a genuine bug here can't wedge the session at `in_progress`
-                # silently or crash an unrelated part of the process. Nothing about an
-                # exception's str() here is assumed safe to show a client, so it is only
-                # logged, never put on the queue or returned.
+                # net for a genuine bug that violates that contract anyway. Without marking
+                # the session here, a bug in this path would wedge the session at
+                # `in_progress` forever: every future reconnect hits the 409 guard in
+                # `stream` above, with no way to ever resolve. Marking it `failed` (not just
+                # logging) is what turns an unforeseen bug into a recoverable failure
+                # instead of a permanently stuck row. Nothing about an exception's str()
+                # here is assumed safe to show a client -- this is exactly the path that
+                # leaked an upstream secret once before -- so only the fixed, generic
+                # message is ever put on the queue; the real detail is logged server-side
+                # only.
                 logger.exception("run_diagnosis crashed for session %s", session_id)
+                repo.set_session_status(connection, session_id, "failed")
+                await queue.put(
+                    ProgressEvent(
+                        type="error", stage="s1_diagnose", message=_GENERIC_DIAGNOSIS_ERROR
+                    )
+                )
             finally:
                 await queue.put(None)
 

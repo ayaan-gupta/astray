@@ -116,7 +116,10 @@ class DeepSeekClient:
             if not detail:
                 detail = response.text[:200]
             raise LlmError(f"deepseek HTTP {response.status_code}: {detail}")
-        return response.json(), elapsed_ms
+        try:
+            return response.json(), elapsed_ms
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise LlmError(f"deepseek response is not valid JSON: {exc}") from exc
 
     @staticmethod
     def _meta(body: dict, model: str, elapsed_ms: int, attempts: int) -> LlmCallMeta:

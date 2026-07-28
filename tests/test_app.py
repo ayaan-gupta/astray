@@ -325,6 +325,52 @@ def test_second_stream_call_while_in_progress_returns_409(tmp_path):
         assert c.get(f"/api/sessions/{sid}").json()["status"] == "diagnosed"
 
 
+def test_non_llm_error_during_diagnosis_marks_session_failed_not_wedged(tmp_path, monkeypatch):
+    """A non-LlmError exception during diagnosis (a genuine bug, or e.g. an
+    UnknownModelError from a typo'd model id) must not wedge the session at
+    `in_progress` forever: chain.py only catches LlmError, so anything else
+    propagates out of run_diagnosis, and produce()'s except Exception must
+    mark the session `failed` and emit a terminal error event -- not just log
+    -- so a reconnect doesn't get a permanent 409."""
+    settings = Settings(
+        _env_file=None,
+        deepseek_api_key="sk-test",
+        db_path=tmp_path / "t.db",
+        media_root=tmp_path / "media",
+    )
+    app = create_app(
+        settings=settings,
+        client_factory=lambda: DeepSeekClient("sk-test", transport=httpx.MockTransport(_handler)),
+    )
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("unexpected bug, not an LlmError")
+
+    monkeypatch.setattr("server.charter.chain.diagnose", boom)
+
+    with TestClient(app) as c:
+        sid = c.post("/api/sessions", json={"handle": "a", "problem": "p", "work": "w"}).json()[
+            "session_id"
+        ]
+
+        with c.stream("GET", f"/api/sessions/{sid}/stream") as response:
+            assert response.status_code == 200
+            text = "".join(response.iter_text())
+
+        assert "event: error" in text
+        assert "event: done" not in text
+        assert "unexpected bug" not in text
+        assert "RuntimeError" not in text
+
+        status_row = c.get(f"/api/sessions/{sid}").json()
+        assert status_row["status"] == "failed"
+
+        # The session must not be wedged: a reconnect gets a replayed terminal
+        # result (200), never a permanent 409.
+        second = c.get(f"/api/sessions/{sid}/stream")
+        assert second.status_code == 200
+
+
 def test_photo_upload_returns_503_when_vision_disabled(client):
     sid = client.post("/api/sessions", json={"handle": "a", "problem": "p", "work": "w"}).json()[
         "session_id"

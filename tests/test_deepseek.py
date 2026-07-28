@@ -200,6 +200,23 @@ async def test_non_dict_error_body_raises_llm_error():
         )
 
 
+async def test_success_response_non_json_body_raises_llm_error():
+    """A 200 response whose body isn't valid JSON at all (e.g. an HTML error page from a
+    misconfigured proxy, or a truncated body) must raise LlmError from the success path in
+    `_post`, mirroring the guard `vision.py` already has -- not an unguarded
+    json.JSONDecodeError escaping to the caller."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"<html>not json at all</html>")
+
+    from server.llm.deepseek import LlmError
+
+    with pytest.raises(LlmError):
+        await _client(handler).complete_text(
+            messages=[{"role": "user", "content": "go"}], model="deepseek-v4-flash"
+        )
+
+
 @pytest.mark.parametrize("body", [{}, {"choices": []}])
 async def test_malformed_success_body_raises_llm_error_via_complete_text(body):
     def handler(request: httpx.Request) -> httpx.Response:
