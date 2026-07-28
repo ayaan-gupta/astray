@@ -132,15 +132,29 @@ async def test_meta_reasoning_is_synthetic():
     assert meta.reasoning == "[fake reasoning for test_key]"
 
 
-async def test_fixtures_transcription_is_valid():
-    """Ensure future Transcription fixture addition is Pydantic-clean."""
-    transcription_json = json.dumps(
-        {
-            "problem": "Solve x + 2 = 5",
-            "steps": ["x = 3"],
-            "confidence": 0.95,
-        }
-    )
-    payload = json.loads(transcription_json)
+def test_transcription_model_accepts_minimal_payload():
+    """Validate that Transcription model accepts minimal valid payload (not a fixture test)."""
+    payload = {
+        "problem": "Solve x + 2 = 5",
+        "steps": ["x = 3"],
+        "confidence": 0.95,
+    }
     transcription = Transcription.model_validate(payload)
     assert transcription.confidence == 0.95
+
+
+async def test_fixture_key_does_not_collide_with_model_id():
+    """Regression test: fixture keyed with a model ID must not match unrelated schema.
+
+    This test prevents silent false matches when a fixture is accidentally keyed
+    with a string that appears in the request metadata (e.g., a model ID).
+    """
+    transport = fake_transport({"deepseek-v4-pro": '{"buggy_rule": "wrong"}'})
+    client = DeepSeekClient("sk-fake", transport=transport)
+    with pytest.raises(LlmError) as exc_info:
+        await client.complete_json(
+            messages=[{"role": "user", "content": "unrelated photosynthesis question"}],
+            schema=Answer,
+            model="deepseek-v4-pro",
+        )
+    assert "no fake fixture matched" in str(exc_info.value)

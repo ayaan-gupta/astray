@@ -33,10 +33,10 @@ FIXTURES: dict[str, str] = {
 def fake_transport(script: dict[str, str]) -> httpx.MockTransport:
     """Return a transport that replies with the value whose key appears in the request.
 
-    Keys are matched as case-insensitive substrings of the serialized request body.
-    This allows matching on messages (for complete_json) and schema names in tools
-    (for complete_strict). An unmatched request returns HTTP 500 so missing fixtures
-    fail loudly.
+    Keys are matched as case-insensitive substrings of intent-bearing parts of the
+    request body (messages and tools arrays), which carry schema definitions.
+    The model field is excluded to prevent silent collisions with model IDs.
+    An unmatched request returns HTTP 500 so missing fixtures fail loudly.
 
     Detects tool_choice to distinguish complete_json (content) from complete_strict
     (tool_calls). For complete_strict, the fixture content is embedded in arguments.
@@ -44,7 +44,11 @@ def fake_transport(script: dict[str, str]) -> httpx.MockTransport:
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        blob = json.dumps(body).lower()
+        search_parts = {
+            "messages": body.get("messages", []),
+            "tools": body.get("tools", []),
+        }
+        blob = json.dumps(search_parts).lower()
         for key, content in script.items():
             if key.lower() in blob:
                 is_strict = "tool_choice" in body
