@@ -33,6 +33,29 @@ Two structural decisions here are not obvious from the route bodies alone:
   already in flight (``409``) and replays the persisted terminal result instead
   of re-running one that already finished; only a session still at ``created``
   actually starts ``run_diagnosis``.
+* **Shutdown drains ``background_tasks`` before closing the client/connection.**
+  Because the diagnosis run is deliberately decoupled from the request (previous
+  bullet), it is *also* invisible to uvicorn's normal connection-draining on
+  shutdown -- once nobody is reading the SSE response there is no connection left
+  to drain, so an ordinary redeploy mid-run would otherwise close the shared LLM
+  client and DB connection out from under a still-running ``produce()`` task.
+  Lifespan shutdown waits (bounded by ``shutdown_drain_timeout_s``) for tracked
+  tasks to finish; anything still running past that timeout is cancelled and its
+  session marked ``failed`` -- never left at ``in_progress`` with no way to ever
+  resolve, since nothing can complete the run after the connection closes.
+* **Upstream-derived error text is never forwarded to a client.** ``LlmError`` and
+  ``VisionUnavailable`` messages can embed arbitrary text from an upstream HTTP
+  response body (DeepSeek's or Gemini's own error responses) -- this app has no
+  way to know that text is free of secrets (e.g. a misconfigured proxy reflecting
+  the outbound ``Authorization``/``x-goog-api-key`` header back in a non-JSON
+  error body). This module is the trust boundary to the client, so it never
+  relays that text verbatim: the SSE ``error`` event's ``message`` and the photo
+  route's 503 ``detail`` are both replaced with a fixed, generic message before
+  leaving this process; the real detail is only logged server-side. The one
+  exception is ``NullVision``'s specific "no GEMINI_API_KEY configured" message,
+  which is a fixed string literal in this codebase, never upstream-derived, and
+  is forwarded verbatim on purpose so a frontend can tell "not configured" apart
+  from a transient failure.
 """
 
 import asyncio
@@ -55,7 +78,7 @@ from server.charter.stages.s0_ingest import ingest_photo, ingest_typed, needs_re
 from server.config import Settings, get_settings
 from server.deps import build_llm_client, build_vision
 from server.llm.deepseek import DeepSeekClient
-from server.llm.vision import VisionUnavailable
+from server.llm.vision import NullVision, VisionProvider, VisionUnavailable
 from server.store import repo
 from server.store.db import connect
 from server.store.seed_taxonomy import seed
@@ -68,6 +91,12 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 # multipart parsing happens. A little above MAX_IMAGE_BYTES for multipart
 # boundary/header overhead around the file part.
 MAX_UPLOAD_BYTES = MAX_IMAGE_BYTES + 1024 * 1024
+# How long shutdown waits for in-flight diagnosis runs to finish before cutting
+# them off. A little under common infra SIGTERM grace periods (e.g. 30s).
+SHUTDOWN_DRAIN_TIMEOUT_S = 25.0
+# Stable, generic client-facing messages -- never the real upstream/exception text.
+_GENERIC_DIAGNOSIS_ERROR = "diagnosis failed; please try again"
+_GENERIC_VISION_ERROR = "photo transcription is temporarily unavailable"
 
 
 class _BodyTooLarge(Exception):
@@ -166,9 +195,12 @@ def create_app(
     *,
     settings: Settings | None = None,
     client_factory: Callable[[], DeepSeekClient] | None = None,
+    vision_factory: Callable[[], VisionProvider] | None = None,
+    shutdown_drain_timeout_s: float = SHUTDOWN_DRAIN_TIMEOUT_S,
 ) -> FastAPI:
     resolved = settings or get_settings()
     make_client = client_factory or (lambda: build_llm_client(resolved))
+    make_vision = vision_factory or (lambda: build_vision(resolved))
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -176,15 +208,35 @@ def create_app(
         app.state.conn = connect(resolved.db_path)
         seed(app.state.conn)
         app.state.client = make_client()
-        app.state.vision = build_vision(resolved)
-        # Strong references for asyncio.create_task()'d diagnosis runs (see the
-        # module docstring): the event loop only holds a *weak* reference to a
-        # task, so a run whose stream response nobody is reading anymore must be
-        # kept alive here or it can be garbage-collected before it finishes.
-        app.state.background_tasks = set()
+        app.state.vision = make_vision()
+        # session_id -> Task, not a bare set: strong references for
+        # asyncio.create_task()'d diagnosis runs (the event loop only holds a
+        # *weak* reference to a task, so a run whose stream response nobody is
+        # reading anymore must be kept alive here or it can be garbage-collected
+        # before it finishes) -- keyed by session_id so shutdown can attribute an
+        # unfinished task back to the session it must mark `failed`.
+        app.state.background_tasks: dict[str, asyncio.Task] = {}
         try:
             yield
         finally:
+            tasks = dict(app.state.background_tasks)
+            if tasks:
+                _done, pending = await asyncio.wait(
+                    tasks.values(), timeout=shutdown_drain_timeout_s
+                )
+                if pending:
+                    for task in pending:
+                        task.cancel()
+                    # return_exceptions=True: a cancelled task raises CancelledError,
+                    # which must not propagate out of shutdown and abort the rest of
+                    # it (closing the client/connection still has to happen below).
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    # Nothing can complete these runs after the client/connection
+                    # below are closed -- leaving them at `in_progress` would be
+                    # indistinguishable from a crash with no way to ever resolve.
+                    for session_id, task in tasks.items():
+                        if task in pending:
+                            repo.set_session_status(app.state.conn, session_id, "failed")
             await app.state.client.aclose()
             aclose = getattr(app.state.vision, "aclose", None)
             if aclose is not None:
@@ -192,17 +244,22 @@ def create_app(
             app.state.conn.close()
 
     app = FastAPI(title="Math Misconception Tutor", lifespan=_lifespan)
+    # MaxBodySizeMiddleware is added first so CORSMiddleware ends up outermost
+    # (Starlette's user-middleware list is built by inserting each new middleware
+    # at the front, so the *last*-added one wraps the others). CORSMiddleware
+    # never touches the request body, so nothing is lost by letting it sit above
+    # the size guard -- and it must, or a rejected request's response (e.g. this
+    # middleware's own 413) never passes through CORSMiddleware's `send` wrapper
+    # and reaches the browser with no `access-control-allow-origin` header, which
+    # makes it an opaque, unreadable network error to frontend JS instead of the
+    # `{"detail": ...}` body.
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_UPLOAD_BYTES)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # Added after CORSMiddleware so it ends up outermost (Starlette's user-middleware
-    # list is built by inserting each new middleware at the front) -- oversized
-    # requests must be rejected before any other middleware, routing, or body
-    # parsing runs.
-    app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_UPLOAD_BYTES)
 
     def conn_of(request: Request):
         return request.app.state.conn
@@ -235,7 +292,18 @@ def create_app(
                 request.app.state.vision, data, file.content_type or "image/png"
             )
         except VisionUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            logger.warning("photo transcription unavailable for session %s: %s", session_id, exc)
+            if isinstance(request.app.state.vision, NullVision):
+                # A fixed string literal from this codebase (server/llm/vision.py),
+                # never upstream-derived -- safe to forward verbatim, and a frontend
+                # needs "GEMINI_API_KEY" in it to tell "not configured" apart from a
+                # transient failure below.
+                detail = str(exc)
+            else:
+                # exc may embed arbitrary text from Gemini's own error response body,
+                # which this app has no way to sanitize -- never forward it.
+                detail = _GENERIC_VISION_ERROR
+            raise HTTPException(status_code=503, detail=detail) from exc
         return {
             "transcription": submission.model_dump(),
             "needs_review": needs_review(submission),
@@ -265,20 +333,30 @@ def create_app(
 
         Used when a client (re)connects to a session that is not ``created`` --
         most commonly an ``EventSource`` auto-reconnecting after the run already
-        completed. Yields the same ``diagnosis_ready``/``done`` shape a live run
-        would have produced, sourced from the durable ``diagnoses`` row rather
-        than a fresh (and separately billed) call to the diagnose stage.
+        completed. Sourced from the durable ``diagnoses`` row rather than a fresh
+        (and separately billed) call to the diagnose stage.
+
+        ``status == "failed"`` is the one terminal status with no ``diagnoses``
+        row (chain.py never persists one on ``LlmError``) -- this replays the
+        same wire shape a live failure produces: a terminal ``error`` event with
+        no ``done`` afterward, so the same failure looks identical whether the
+        client was connected live or reconnects later. There is no persisted
+        failure detail to include (chain.py doesn't keep any either), so this
+        uses the same generic message the live path sanitizes down to.
         """
 
         async def replay() -> AsyncIterator[str]:
             diagnosis_row = repo.get_diagnosis(connection, session_id)
-            if diagnosis_row is not None:
-                diagnosis = json.loads(diagnosis_row["payload_json"])
-                diagnosis["misconception_id"] = diagnosis_row["misconception_id"]
-                ready = ProgressEvent(
-                    type="diagnosis_ready", stage="s1_diagnose", payload=diagnosis
+            if diagnosis_row is None:
+                error = ProgressEvent(
+                    type="error", stage="s1_diagnose", message=_GENERIC_DIAGNOSIS_ERROR
                 )
-                yield f"event: {ready.type}\ndata: {ready.model_dump_json()}\n\n"
+                yield f"event: {error.type}\ndata: {error.model_dump_json()}\n\n"
+                return
+            diagnosis = json.loads(diagnosis_row["payload_json"])
+            diagnosis["misconception_id"] = diagnosis_row["misconception_id"]
+            ready = ProgressEvent(type="diagnosis_ready", stage="s1_diagnose", payload=diagnosis)
+            yield f"event: {ready.type}\ndata: {ready.model_dump_json()}\n\n"
             done = ProgressEvent(type="done", payload={"status": status})
             yield f"event: {done.type}\ndata: {done.model_dump_json()}\n\n"
 
@@ -331,14 +409,23 @@ def create_app(
                 await queue.put(None)
 
         task = asyncio.create_task(produce())
-        request.app.state.background_tasks.add(task)
-        task.add_done_callback(request.app.state.background_tasks.discard)
+        request.app.state.background_tasks[session_id] = task
+        task.add_done_callback(
+            lambda _t, sid=session_id: request.app.state.background_tasks.pop(sid, None)
+        )
 
         async def events() -> AsyncIterator[str]:
             while True:
                 event = await queue.get()
                 if event is None:
                     break
+                if event.type == "error":
+                    # event.message may embed arbitrary upstream-derived text (an
+                    # LlmError built from a misbehaving proxy's response body) --
+                    # this is the trust boundary to the client, so it is logged
+                    # here, never forwarded verbatim.
+                    logger.warning("diagnosis error for session %s: %s", session_id, event.message)
+                    event = event.model_copy(update={"message": _GENERIC_DIAGNOSIS_ERROR})
                 yield f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
 
         return StreamingResponse(
@@ -348,6 +435,3 @@ def create_app(
         )
 
     return app
-
-
-app_factory = create_app
