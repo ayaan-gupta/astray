@@ -3910,12 +3910,39 @@ Baseline rule-match rate: <FILL IN from step 6>"
 
 ## Phase 1 Definition of Done
 
-- [ ] `uv run pytest -q` — all green, zero network calls
-- [ ] `uv run ruff check server tests evals` — clean
-- [ ] `uv run python -m evals.diagnosis.run` — ≥80% rule match, baseline recorded
-- [ ] Manual smoke test (Task 13 Step 7) returns a correct diagnosis over SSE
-- [ ] `git check-ignore server/.env` confirms secrets are untracked
-- [ ] `sqlite3 data/tutor.db "SELECT stage, model, cost_usd FROM run_artifacts"` shows provenance
+- [x] `uv run pytest -q` — 280 passed, 1 intentional xfail, zero network calls
+- [x] `uv run ruff check server tests evals` — clean, and `ruff format --check` too
+- [ ] `uv run python -m evals.diagnosis.run` — ≥80% rule match. **Not met. See below.**
+- [x] Manual smoke test returns a correct diagnosis over SSE — verified against the live
+      DeepSeek API through real uvicorn: `(a+b)^2 -> a^2 + b^2`, `verified_by_sympy=true`,
+      matched to the seeded `freshmans-dream`, $0.0018 in 9.9s
+- [x] `git check-ignore server/.env` confirms secrets are untracked
+- [x] `run_artifacts` shows provenance — `s1_diagnose` / `deepseek-v4-pro` / cost recorded
+
+### The eval gate does not yet measure what it claims
+
+Two live runs on identical code: **11/20 and 10/20 rule match — with substantially different
+failing sets.** Cases that passed one run failed the next and vice versa.
+
+Reading every failure against its case definition, the diagnoses are substantively correct in
+essentially all of them. They fail on notation the model legitimately varies between runs:
+`log(a+b) -> log(a) + log(b)` versus `log(a + b) -> log a + log b`; prime notation versus
+`d/dx`; one pair of parentheses; `cx` versus `a x`. Two rounds of case-set correction moved
+which cases fail without moving the number, which is the tell: `canonicalize_rule` normalizes
+variable names and digits but not notational form, and no bag-of-words overlap threshold
+separates a correct paraphrase from a confidently wrong one — that was measured, not assumed
+(a disclaiming attack scored 0.263 against a legitimate match's 0.105 on the same alias;
+Jaccard and Dice behave the same way).
+
+**The two metrics that are trustworthy both look good: topic match 20/20, SymPy verification
+18/20.** Those measure what they claim. Rule match does not, and the honest reading is that
+the gate needs semantic comparison — an LLM judge scoring "same misconception, yes or no" —
+rather than string matching. That is Phase 2 work.
+
+The gate was deliberately **not** tuned until it passed. Adding aliases to chase each run's
+phrasing would fit the gate to the model it grades and destroy the only measurement of
+diagnosis quality in the project. `_PASS_THRESHOLD` stays at 0.8 and the harness exits
+non-zero, which is the truthful state.
 
 ---
 
