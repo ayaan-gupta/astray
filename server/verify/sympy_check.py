@@ -40,6 +40,7 @@ wall-clock timeout and killing it outright on expiry — see ``run_check`` and
 ``_run_check_unbounded`` below.
 """
 
+import asyncio
 import multiprocessing
 import re
 from multiprocessing.connection import Connection
@@ -246,6 +247,12 @@ def _worker(check_data: dict, conn: Connection) -> None:
 def run_check(check: SympyCheck, timeout: float = _DEFAULT_TIMEOUT_SECONDS) -> CheckResult:
     """Run the model's requested symbolic check. Never raises. Never hangs.
 
+    **Blocks the calling thread for up to ``timeout`` seconds**
+    (``process.start()``/``process.join()`` are synchronous). Fine to call
+    directly from sync code or a test. From an ``async`` call site, calling
+    this inline stalls the event loop — and every other coroutine scheduled
+    on it — for up to the full timeout; use ``run_check_async`` instead.
+
     A failure to verify — malformed syntax, an unsupported kind, a solver that
     can't produce a finite comparable answer, hostile input, or a computation
     that ran past ``timeout`` seconds — is a result, not an exception:
@@ -299,7 +306,16 @@ def run_check(check: SympyCheck, timeout: float = _DEFAULT_TIMEOUT_SECONDS) -> C
             )
 
         if parent_conn.poll():
-            return CheckResult(**parent_conn.recv())
+            # poll() returns True as soon as the peer's write end closes, which
+            # happens whenever the child exits — including when it dies
+            # (crash, OOM kill, external signal) without ever calling send().
+            # recv() in that case raises EOFError, not a shortage of data to
+            # wait for; catch it and fall through to the exit-code detail
+            # below instead of surfacing a generic, uninformative EOFError.
+            try:
+                return CheckResult(**parent_conn.recv())
+            except EOFError:
+                pass
 
         return CheckResult(
             verified=False,
@@ -313,3 +329,21 @@ def run_check(check: SympyCheck, timeout: float = _DEFAULT_TIMEOUT_SECONDS) -> C
             else f"verification failed: {type(exc).__name__}"
         )
         return CheckResult(verified=False, detail=detail)
+
+
+async def run_check_async(
+    check: SympyCheck, timeout: float = _DEFAULT_TIMEOUT_SECONDS
+) -> CheckResult:
+    """Async entry point for ``run_check``. Use this from async callers.
+
+    ``run_check`` blocks its calling thread for up to ``timeout`` seconds
+    (``process.start()``/``process.join()`` are synchronous calls). Called
+    inline from a coroutine, that stalls the event loop — and every other
+    request being served on that loop — for up to the full timeout. This
+    wrapper offloads the blocking call to a worker thread via
+    ``asyncio.to_thread``, so the event loop stays free while the check runs.
+    Task 11 (and any other async caller) should call this, not ``run_check``,
+    from request-handling coroutines. Never raises, never hangs, for the same
+    reasons ``run_check`` doesn't — it's the same code, just off-thread.
+    """
+    return await asyncio.to_thread(run_check, check, timeout)

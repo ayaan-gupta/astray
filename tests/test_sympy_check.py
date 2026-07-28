@@ -1,7 +1,12 @@
+import asyncio
+import multiprocessing
+import os
+import signal
+import threading
 import time
 
 from server.charter.contracts import SympyCheck
-from server.verify.sympy_check import run_check
+from server.verify.sympy_check import run_check, run_check_async
 
 # Short timeout for the deliberate-hang tests below: long enough to comfortably
 # clear subprocess start/kill overhead (observed ~0.2-0.3s), short enough that
@@ -272,3 +277,78 @@ def test_legal_variable_absent_from_equation_with_empty_candidates_is_not_verifi
     )
     assert result.verified is False
     assert "does not appear in the equation" in result.detail
+
+
+# --- Fix round 2: subprocess-machinery diagnostics and the async entry point
+# (see task-7-report.md "Fix round 2" section for the full writeup) ---
+
+
+def test_child_killed_externally_reports_exit_status_not_eoferror():
+    # Connection.poll() returns True the instant the peer's write end closes -
+    # including when the child dies without ever calling send(). Before the
+    # fix, recv() in that situation raised a bare EOFError that the outer
+    # handler flattened into a generic "verification failed: EOFError",
+    # burying the actual exit status. This drives that exact scenario with a
+    # real external signal (mid-computation, before the child ever gets a
+    # chance to send a result) and asserts the exit code surfaces instead.
+    check = SympyCheck(kind="equivalence", lhs="2**2**2**2**2**2**2**2", rhs="0")
+    result_holder: dict[str, object] = {}
+
+    def call_run_check() -> None:
+        result_holder["result"] = run_check(check, timeout=30.0)
+
+    pids_before = {p.pid for p in multiprocessing.active_children()}
+    thread = threading.Thread(target=call_run_check)
+    thread.start()
+
+    child_pid = None
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        new_children = [p for p in multiprocessing.active_children() if p.pid not in pids_before]
+        if new_children:
+            child_pid = new_children[0].pid
+            break
+        time.sleep(0.01)
+    assert child_pid is not None, "child process never started within 5s"
+
+    os.kill(child_pid, signal.SIGKILL)
+    thread.join(timeout=10.0)
+    assert not thread.is_alive(), "run_check did not return after its child was killed"
+
+    result = result_holder["result"]
+    assert result.verified is False
+    assert "exit code" in result.detail
+    assert "EOFError" not in result.detail
+
+
+async def test_run_check_async_does_not_block_the_event_loop():
+    # A ticker coroutine scheduled alongside the check: if run_check_async
+    # blocked the event loop synchronously (as a bare `await`-free call to
+    # run_check would), the ticker would accumulate zero ticks for the whole
+    # call and then burst all at once right after - a large gap between
+    # consecutive tick timestamps. asyncio.to_thread keeps the loop free, so
+    # ticks should stay roughly evenly spaced throughout.
+    tick_times: list[float] = []
+
+    async def ticker() -> None:
+        while True:
+            await asyncio.sleep(0.05)
+            tick_times.append(time.monotonic())
+
+    ticker_task = asyncio.create_task(ticker())
+    check = SympyCheck(kind="equivalence", lhs="2**2**2**2**2**2", rhs="0")
+    result = await run_check_async(check, timeout=1.0)
+
+    ticker_task.cancel()
+    try:
+        await ticker_task
+    except asyncio.CancelledError:
+        pass
+
+    assert result.verified is False
+    assert "timed out" in result.detail
+    assert tick_times, "ticker never got a chance to run at all"
+    gaps = [b - a for a, b in zip(tick_times, tick_times[1:], strict=False)]
+    assert not gaps or max(gaps) < 0.3, (
+        f"largest gap between ticks was {max(gaps):.3f}s - event loop was blocked"
+    )
