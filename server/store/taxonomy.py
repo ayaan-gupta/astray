@@ -5,6 +5,7 @@ added after the fact rather than by constraining what the tutor may diagnose.
 """
 
 import json
+import logging
 import re
 import sqlite3
 
@@ -13,7 +14,18 @@ from pydantic import BaseModel
 from server.charter.contracts import Diagnosis
 from server.llm.deepseek import DeepSeekClient, LlmError
 
+logger = logging.getLogger(__name__)
+
 _VAR_RUN = re.compile(r"\b[a-z]\b")
+# Single-letter variable with an explicit subscript (x_1, y_23): the trailing
+# \b[a-z]\b above never matches these because the underscore is a \w character,
+# so there is no word boundary between the letter and the "_" that follows it.
+# Deliberately scoped to a single letter immediately before "_" so it cannot
+# also swallow the last letter of a multi-letter identifier (e.g. "log_2" has
+# no boundary before its "g" either, so it is left untouched — see
+# canonicalize_rule's docstring for why multi-letter identifiers must not be
+# collapsed).
+_SUBSCRIPT_VAR = re.compile(r"\b[a-z]_")
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"\d+")
 
@@ -27,25 +39,94 @@ class MatchDecision(BaseModel):
 def canonicalize_rule(rule: str) -> str:
     """Collapse cosmetic differences so the same error matches across problems.
 
-    Single-letter variables become ``v`` and numerals become ``#``, so
-    ``(x+3)^2 -> x^2+9`` and ``(t+5)^2 -> t^2+25`` share one canonical form
-    while ``(a+b)^2 -> a^2+b^2`` stays distinct from both.
+    Single-letter variables (bare, like ``x``, or subscripted, like ``x_1``)
+    become ``v`` and numerals become ``#``, so ``(x+3)^2 -> x^2+9`` and
+    ``(t+5)^2 -> t^2+25`` share one canonical form while ``(a+b)^2 -> a^2+b^2``
+    stays distinct from both.
 
     The numeral placeholder MUST NOT be a lowercase letter: ``_VAR_RUN``
     runs afterwards and would re-capture it as a variable, collapsing
     digits and variables into the same token.
+
+    Multi-letter identifiers (``sin``, ``log``, ``sqrt``, ...) are deliberately
+    NOT collapsed, even though that would let a couple more rules merge: doing
+    so would map ``sin(x+y) -> sin(x)+sin(y)`` and ``log(x+y) -> log(x)+log(y)``
+    onto the same canonical form, silently merging two distinct seeded
+    misconceptions (``trig-distribute`` and ``log-of-sum``). Under-merging
+    here just costs one extra LLM adjudication call and still lands on the
+    right answer; over-merging destroys the distinction permanently. Do not
+    "fix" this without re-deriving that tradeoff.
     """
     text = rule.strip().lower()
     text = text.replace("→", "->").replace("=>", "->")
     text = _NUM.sub("#", text)
+    text = _SUBSCRIPT_VAR.sub("v_", text)
     text = _VAR_RUN.sub("v", text)
     text = _WS.sub("", text)
     return text
 
 
-def _slugify(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
-    return slug[:64] or "unnamed-misconception"
+def _slug_candidate(text: str) -> tuple[str, bool]:
+    """Slugify ``text`` (lowercase, non-alnum runs to ``-``, capped at 64 chars)
+    and report whether the result was truncated.
+
+    ``was_truncated`` is True when the raw slug exceeded 64 characters and had
+    to be cut — the signal ``_resolve_slug_for_mint`` uses to decide whether an
+    exact slug match is trustworthy on its own or needs corroboration.
+    """
+    raw = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
+    if not raw:
+        return "unnamed-misconception", False
+    return raw[:64], len(raw) > 64
+
+
+def _is_slug_unique_violation(exc: sqlite3.IntegrityError) -> bool:
+    """True only for a UNIQUE-constraint violation on ``misconceptions.slug``.
+
+    That is the one failure this module knows how to recover from (a lost
+    race against a concurrent mint of the same slug). ``MIGRATIONS`` is
+    append-only and later phases add tables/constraints to ``misconceptions``;
+    a future FK or CHECK violation must surface as real corruption rather than
+    being misreported as "just a race" and silently swallowed.
+    """
+    message = str(exc)
+    return "UNIQUE constraint failed" in message and "misconceptions.slug" in message
+
+
+def _resolve_slug_for_mint(
+    conn: sqlite3.Connection, source_text: str, canonical: str
+) -> tuple[str, int | None]:
+    """Pick the slug (and, if it is a genuine match, the row id to reuse) for a
+    misconception about to be minted from ``source_text`` — an LLM-proposed
+    ``new_slug`` or, on fallback, the raw ``buggy_rule``.
+
+    ``_slug_candidate`` truncates to 64 characters. An *untruncated* exact slug match
+    is trusted outright: two short, human/LLM-composed names agreeing in full
+    is strong evidence of real identity, and this is exactly the mechanism
+    ``test_duplicate_slug_reuses_existing_row`` relies on (the model naming an
+    existing curated slug on purpose). A *truncated* match is much weaker
+    evidence — it only proves the first 64 characters agree, and two
+    genuinely different long buggy rules can share that prefix and diverge
+    after it. So a truncated match is corroborated against ``canonical_rule``
+    before being trusted; on mismatch, a fresh, disambiguated slug is minted
+    instead of silently merging two distinct misconceptions into one row.
+    """
+    base_slug, truncated = _slug_candidate(source_text)
+
+    slug = base_slug
+    suffix = 2
+    while True:
+        row = conn.execute(
+            "SELECT id, canonical_rule FROM misconceptions WHERE slug = ?", (slug,)
+        ).fetchone()
+        if row is None:
+            return slug, None
+        if not truncated or row["canonical_rule"] == canonical:
+            return slug, int(row["id"])
+        # Spurious truncation collision: a different misconception happened to
+        # truncate to the same 64 characters. Disambiguate rather than reuse.
+        slug = f"{base_slug[:60]}-{suffix}"
+        suffix += 1
 
 
 def _candidates(
@@ -100,9 +181,19 @@ async def resolve_misconception(
         decision, _ = await client.complete_strict(
             messages=[{"role": "user", "content": prompt}], schema=MatchDecision, model=model
         )
-    except LlmError:
+    except LlmError as exc:
         # Never fail a session over taxonomy bookkeeping; mint from the rule itself.
-        decision = MatchDecision(new_slug=_slugify(diagnosis.buggy_rule))
+        # This row is indistinguishable later from a confident LLM-adjudicated mint
+        # (same is_seed=0, no provenance column on misconceptions) — logged so an
+        # LLM outage that mints a wave of near-duplicates can be found and
+        # re-triaged later instead of vanishing silently into the taxonomy.
+        logger.warning(
+            "resolve_misconception: LLM adjudication failed (%s); minting from raw "
+            "buggy_rule without adjudication (topic=%r)",
+            exc,
+            diagnosis.topic,
+        )
+        decision = MatchDecision(new_slug=diagnosis.buggy_rule)
 
     if decision.same_as_id is not None:
         row = conn.execute(
@@ -117,11 +208,14 @@ async def resolve_misconception(
                     (json.dumps(aliases), row["id"]),
                 )
             return int(row["id"])
+        # Hallucinated same_as_id with no matching row: fall through to the
+        # normal new_slug minting path below instead of erroring.
 
-    slug = _slugify(decision.new_slug or diagnosis.buggy_rule)
-    existing = conn.execute("SELECT id FROM misconceptions WHERE slug = ?", (slug,)).fetchone()
-    if existing:
-        return int(existing["id"])
+    slug, existing_id = _resolve_slug_for_mint(
+        conn, decision.new_slug or diagnosis.buggy_rule, canonical
+    )
+    if existing_id is not None:
+        return existing_id
 
     try:
         cursor = conn.execute(
@@ -130,7 +224,9 @@ async def resolve_misconception(
                VALUES (?, ?, ?, ?, 0)""",
             (slug, diagnosis.misconception_statement, canonical, diagnosis.topic),
         )
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as exc:
+        if not _is_slug_unique_violation(exc):
+            raise
         # Lost a race against a concurrent resolve_misconception() that minted the
         # same slug between our existence check and this insert (e.g. two sessions
         # hitting the same brand-new rule at once). Reuse the row the other caller
