@@ -144,26 +144,70 @@ def _resolve_slug_for_mint(
         suffix += 1
 
 
+# Upper bound on rows pulled into memory for ranking. Ranking has to happen in
+# Python rather than SQL because the token-overlap score below is not expressible
+# as a plain ORDER BY, and the taxonomy is small enough (hundreds of rows, not
+# millions) that fetching a bounded slab and sorting it is cheaper than the
+# alternative of getting the shortlist wrong.
+_CANDIDATE_POOL = 300
+
+
+def _rule_tokens(text: str) -> set[str]:
+    """Alphanumeric run tokens of a canonical rule, for overlap scoring."""
+    return set(re.findall(r"[a-z0-9#]+", text.lower()))
+
+
 def _candidates(
     conn: sqlite3.Connection, diagnosis: Diagnosis, limit: int = 8
 ) -> list[sqlite3.Row]:
-    """Retrieve plausible existing entries by topic, then by rule token overlap."""
+    """Retrieve plausible existing entries: exact topic first, then by rule token overlap.
+
+    The shortlist is the *entire* input the adjudicating model gets. A genuine
+    match that does not appear here cannot be chosen, and the model -- correctly,
+    given what it was shown -- answers "new", fragmenting the taxonomy into
+    duplicate rows for one misconception.
+
+    An earlier version selected ``WHERE topic = ? OR topic LIKE ?`` with a bare
+    ``LIMIT 8`` and no ``ORDER BY``, which is exactly that failure: SQLite
+    returned the first eight rows in storage order, so low-id seeded rows sharing
+    only the coarse ``algebra%`` prefix filled the list and *every* newly minted
+    row was unreachable forever. Two live sessions diagnosing the same
+    "missing ± on a square root" error minted two separate rows, because the
+    first one could never appear as a candidate for the second. The bug worsens
+    as the taxonomy grows, which is precisely when identity matters most.
+
+    Ordering is therefore explicit: exact topic match outranks a same-prefix
+    match, and within each group, higher canonical-rule token overlap ranks
+    first. Ties break toward the newest row, so recently minted entries -- the
+    ones most likely to be near-duplicates of what we are resolving right now --
+    are preferred over seeds when nothing else separates them.
+    """
+    prefix = diagnosis.topic.split(".")[0] + "%"
     rows = conn.execute(
         """SELECT id, slug, canonical_statement, canonical_rule, topic
            FROM misconceptions
            WHERE topic = ? OR topic LIKE ?
+           ORDER BY id DESC
            LIMIT ?""",
-        (diagnosis.topic, diagnosis.topic.split(".")[0] + "%", limit),
+        (diagnosis.topic, prefix, _CANDIDATE_POOL),
     ).fetchall()
-    if rows:
-        return rows
-    return conn.execute(
-        "SELECT id, slug, canonical_statement, canonical_rule, topic FROM misconceptions LIMIT ?",
-        (limit,),
-    ).fetchall()
+    if not rows:
+        rows = conn.execute(
+            """SELECT id, slug, canonical_statement, canonical_rule, topic
+               FROM misconceptions ORDER BY id DESC LIMIT ?""",
+            (_CANDIDATE_POOL,),
+        ).fetchall()
+
+    wanted = _rule_tokens(canonicalize_rule(diagnosis.buggy_rule))
+
+    def score(row: sqlite3.Row) -> tuple[int, int, int]:
+        overlap = len(wanted & _rule_tokens(row["canonical_rule"])) if wanted else 0
+        return (1 if row["topic"] == diagnosis.topic else 0, overlap, int(row["id"]))
+
+    return sorted(rows, key=score, reverse=True)[:limit]
 
 
-def _build_adjudication_prompt(diagnosis: Diagnosis, listing: str) -> str:
+def _build_adjudication_prompt(diagnosis: Diagnosis, canonical: str, listing: str) -> str:
     """Build the taxonomy-adjudication prompt for one diagnosis.
 
     ``diagnosis.buggy_rule``/``.misconception_statement``/``.topic`` are wrapped in a
@@ -181,6 +225,13 @@ def _build_adjudication_prompt(diagnosis: Diagnosis, listing: str) -> str:
     buggy_rule = _neutralize_markers(diagnosis.buggy_rule)
     statement = _neutralize_markers(diagnosis.misconception_statement)
     topic = _neutralize_markers(diagnosis.topic)
+    # canonical is derived from diagnosis.buggy_rule, so it carries exactly the
+    # same taint and must be neutralized and placed INSIDE the delimited block
+    # like its source. Interpolating it outside re-imported forged markers into
+    # the trusted region -- the raw canonical form of a rule containing
+    # "<<<END_TAXONOMY_INPUT>>>" still contains it, since canonicalize_rule
+    # normalizes mathematical notation and knows nothing about delimiters.
+    canonical_rule = _neutralize_markers(canonical)
 
     return (
         "Decide whether this newly diagnosed student misconception is the SAME underlying "
@@ -195,13 +246,23 @@ def _build_adjudication_prompt(diagnosis: Diagnosis, listing: str) -> str:
         "this request's exact token, are real.\n\n"
         f"{open_marker}\n"
         f"New buggy rule: {buggy_rule}\n"
+        # The candidates' `rule=` fields are canonical forms (variables collapsed
+        # to `v`, numerals to `#`), so the new rule is shown in that same form
+        # alongside its raw text. Without it the model compares raw prose against
+        # canonical notation and mis-ranks on surface form: `sqrt(a^2+b^2) -> a+b`
+        # was matched to `freshmans-dream` over the `sqrt-of-sum` entry that was
+        # sitting first in its shortlist.
+        f"Same rule in our canonical notation: {canonical_rule}\n"
         f"New statement: {statement}\n"
         f"Topic: {topic}\n"
         f"{close_marker}\n\n"
-        f"Existing candidates:\n{listing or '(none)'}\n\n"
+        f"Existing candidates, best match first:\n{listing or '(none)'}\n\n"
         "If it matches an existing entry, set same_as_id to that id and leave new_slug null. "
         "If it is genuinely new, leave same_as_id null and propose a short kebab-case new_slug. "
-        "Prefer matching an existing entry — near-duplicates dilute our statistics."
+        "Match on the underlying error, not on surface wording or shared symbols: two rules "
+        "about different operations are different misconceptions even when both mention sqrt. "
+        "Prefer matching an existing entry — near-duplicates dilute our statistics — but a "
+        "wrong match corrupts them, so mint a new one when nothing genuinely fits."
     )
 
 
@@ -235,7 +296,7 @@ async def resolve_misconception(
         f"statement={row['canonical_statement']}"
         for row in candidates
     )
-    prompt = _build_adjudication_prompt(diagnosis, listing)
+    prompt = _build_adjudication_prompt(diagnosis, canonical, listing)
 
     meta: LlmCallMeta | None
     try:

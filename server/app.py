@@ -78,7 +78,7 @@ from typing import Annotated
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -187,11 +187,24 @@ class MaxBodySizeMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
+# Per-field caps on typed input. MaxBodySizeMiddleware bounds the whole request
+# at MAX_UPLOAD_BYTES (11 MB, sized for image uploads), which is far too generous
+# for text: without these, a 10 MB `work` string is accepted and forwarded
+# verbatim into the diagnose prompt, costing millions of tokens on a single
+# request. These bounds are well above any real submission -- 400 steps of 50
+# characters still fits in `work` -- and are enforced by Pydantic, so an
+# oversized field is a 422 at the edge rather than an upstream bill.
+MAX_PROBLEM_CHARS = 4_000
+MAX_WORK_CHARS = 20_000
+MAX_PROSE_CHARS = 4_000
+MAX_HANDLE_CHARS = 100
+
+
 class CreateSessionRequest(BaseModel):
-    handle: str = "anon"
-    problem: str
-    work: str = ""
-    prose: str | None = None
+    handle: str = Field(default="anon", max_length=MAX_HANDLE_CHARS)
+    problem: str = Field(max_length=MAX_PROBLEM_CHARS)
+    work: str = Field(default="", max_length=MAX_WORK_CHARS)
+    prose: str | None = Field(default=None, max_length=MAX_PROSE_CHARS)
 
     @field_validator("problem")
     @classmethod

@@ -37,11 +37,13 @@ Work in this order:
    and write a `clarifying_question` that would distinguish the possibilities.
 
 **If the student's work is actually correct** — no divergence from valid reasoning anywhere
-in their steps — do not invent a misconception to fill the field. Set `divergence_index`
-to null, set `buggy_rule` to a short statement that no error was found (e.g. "none -- the
-student's solution is correct"), keep `confidence` high, and write a `misconception_statement`
-that tells the student their work is correct. Confidently inventing an error the student
-did not make is exactly as bad as missing a real one.
+in their steps — do not invent a misconception to fill the field. Set `no_error_found: true`
+and `divergence_index` to null, set `buggy_rule` to the exact string `none`, keep `confidence`
+high, and write a `misconception_statement` that tells the student their work is correct.
+Confidently inventing an error the student did not make is exactly as bad as missing a real
+one. Set `no_error_found: true` only for genuinely correct work — never as a way out of a
+hard diagnosis. If you are unsure whether there is an error, that is `is_unclear`, not
+`no_error_found`.
 
 `misconception_statement` is shown to the student. One sentence, second person, no jargon,
 describing what they did rather than labelling them.

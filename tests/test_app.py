@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app import MAX_UPLOAD_BYTES, create_app
+from server.app import MAX_PROBLEM_CHARS, MAX_UPLOAD_BYTES, MAX_WORK_CHARS, create_app
 from server.config import Settings
 from server.llm.deepseek import DeepSeekClient
 from server.llm.vision import GeminiVision
@@ -1114,3 +1114,32 @@ async def test_shutdown_fails_unfinished_background_run_instead_of_leaving_in_pr
         assert row["status"] == "failed"
     finally:
         verify_conn.close()
+
+
+def test_oversized_work_field_is_rejected(client):
+    """Per-field caps, not just the 11 MB transport guard, bound prompt size.
+
+    MaxBodySizeMiddleware is sized for image uploads, so without a field cap a
+    10 MB `work` string is accepted and forwarded verbatim into the diagnose
+    prompt -- millions of tokens billed on one request.
+    """
+    response = client.post(
+        "/api/sessions",
+        json={"handle": "t", "problem": "p", "work": "x" * (MAX_WORK_CHARS + 1)},
+    )
+    assert response.status_code == 422
+
+
+def test_oversized_problem_field_is_rejected(client):
+    response = client.post(
+        "/api/sessions", json={"handle": "t", "problem": "p" * (MAX_PROBLEM_CHARS + 1)}
+    )
+    assert response.status_code == 422
+
+
+def test_work_at_the_cap_is_accepted(client):
+    """The cap must sit well above any real submission, not clip normal use."""
+    response = client.post(
+        "/api/sessions", json={"handle": "t", "problem": "p", "work": "x" * MAX_WORK_CHARS}
+    )
+    assert response.status_code == 201

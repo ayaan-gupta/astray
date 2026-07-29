@@ -26,12 +26,21 @@ photo transcribed by a vision model). Astray:
    error made with different letters lands on the same entry — which is what
    makes cross-session pattern tracking possible.
 
+When the work is already correct, Astray says so and stops: the session ends at
+`correct` with no misconception attached. Inventing an error the student did not
+make is treated as exactly as bad as missing a real one, and a "you were right"
+result must never enter their misconception history.
+
 ## Design commitments
 
 **The diagnosis is falsifiable.** Every diagnosis carries a SymPy expression
 whose truth value would disprove it. That check runs deterministically in a
 killable subprocess behind a character allow-list, and its result — not the
-model's claim — is what gets stored as `verified_by_sympy`.
+model's claim — is what gets stored as `verified_by_sympy`. A check that cannot
+fail does not count: an equivalence asserting `X == X` is rejected as vacuous,
+because `verified_by_sympy` is what lifts a diagnosis past the unverified
+confidence ceiling and a tautology would launder an unchecked claim into a
+certified one.
 
 **Student text is untrusted.** Submissions are wrapped in per-request nonce
 delimiters in every prompt, with content-blind neutralization of forged
@@ -76,7 +85,7 @@ stored result rather than re-running it.
 ## Development
 
 ```bash
-uv run pytest          # 280 tests, no network — all HTTP via MockTransport
+uv run pytest          # 291 tests, no network — all HTTP via MockTransport
 uv run ruff check .
 uv run ruff format --check .
 uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model

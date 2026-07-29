@@ -61,6 +61,11 @@ _TRANSFORMS = standard_transformations + (
     convert_xor,
 )
 
+# Used to compare an equivalence check's two sides for textual identity, which
+# makes the check vacuous. Whitespace is stripped first so "(x+1)**2" and
+# "(x + 1)**2" are recognized as the same assertion.
+_WHITESPACE = re.compile(r"\s+")
+
 # Above this, a literal integer exponent (e.g. "2**10000000000") computes a
 # number with tens of millions of digits and can take the process down; a
 # real algebra/calculus problem never needs an exponent this large. This is a
@@ -176,6 +181,20 @@ def _run_check_unbounded(check: SympyCheck) -> CheckResult:
         if check.kind == "equivalence":
             if not check.lhs or not check.rhs:
                 return CheckResult(verified=False, detail="equivalence needs lhs and rhs")
+            if _WHITESPACE.sub("", check.lhs) == _WHITESPACE.sub("", check.rhs):
+                # `X == X` is true for every X, so it cannot fail and therefore
+                # verifies nothing -- the same defect as the absent-variable case
+                # in solution_set below. Reporting it as verified would be worse
+                # than useless: `verified_by_sympy` is what lifts a diagnosis
+                # past the unverified confidence ceiling, so a vacuous check
+                # launders an unchecked claim into a certified one. Observed
+                # live on "simplify sqrt(x^2+9)", where the correct answer is
+                # that the expression does not simplify and the model had no
+                # non-trivial identity to assert.
+                return CheckResult(
+                    verified=False,
+                    detail="check is vacuous: lhs and rhs are identical, so it cannot fail",
+                )
             difference = _parse(check.lhs) - _parse(check.rhs)
             if _is_zero(difference):
                 return CheckResult(verified=True, detail=f"{check.lhs} == {check.rhs}")

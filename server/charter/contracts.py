@@ -74,6 +74,18 @@ class Diagnosis(BaseModel):
     correct_solution: list[str]
     sympy_check: SympyCheck
     verified_by_sympy: bool = False
+    # True when the student's work is already correct and there is no error to
+    # diagnose. This is a first-class outcome, not a degenerate diagnosis: the
+    # prompt has always told the model to say so rather than invent an error,
+    # but without an explicit flag the downstream pipeline could not tell that
+    # answer apart from a real one and minted a taxonomy entry from the prose
+    # in `buggy_rule` ("none -- the student's solution is correct"). That row
+    # then became a cross-topic magnet, since every later correct submission
+    # canonicalized onto it, and it surfaced in students' misconception
+    # histories as if it were a diagnosed error. `divergence_index is None`
+    # cannot substitute for this flag -- it is also null when the student
+    # supplied no steps at all.
+    no_error_found: bool = False
     divergence_index: int | None = None
     buggy_rule: str
     misconception_statement: str

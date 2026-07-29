@@ -60,6 +60,13 @@ Design notes, answering the questions this module invites:
   is nothing here that needs to catch, since the callee's contract is "never
   raises". A session with a diagnosis that only matched the taxonomy via
   fallback still reaches ``diagnosed``/``needs_clarification`` normally.
+* **Correct work terminates at ``correct``, with no misconception.** When the
+  diagnose stage reports ``no_error_found``, the taxonomy is skipped entirely
+  and the ``diagnoses`` row is written with a null ``misconception_id`` and an
+  empty ``canonical_rule``. This is the only success path that produces a
+  ``diagnoses`` row not pointing at a ``misconceptions`` row, and it is what
+  keeps "the student was right" out of the misconception statistics that
+  cross-session pattern tracking is built on.
 * **Late subscribers can miss events.** ``run_diagnosis`` is a plain async
   generator: it is not a broadcast/pub-sub stream, so a second consumer that
   starts iterating after the first has already advanced the generator would
@@ -97,7 +104,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from server.charter.contracts import StageName, StudentSubmission
+from server.charter.contracts import LlmCallMeta, StageName, StudentSubmission
 from server.charter.stages.s1_diagnose import diagnose
 from server.config import Settings
 from server.llm.deepseek import DeepSeekClient, LlmError
@@ -174,12 +181,24 @@ class Chain:
             payload={"reasoning": meta.reasoning, "cost_usd": meta.cost_usd},
         )
 
-        misconception_id, taxonomy_meta = await taxonomy.resolve_misconception(
-            self._conn,
-            self._client,
-            diagnosis=diagnosis,
-            model=self._settings.deepseek_model_fast,
-        )
+        misconception_id: int | None
+        taxonomy_meta: LlmCallMeta | None
+        if diagnosis.no_error_found:
+            # Correct work is not a misconception, so it must not be resolved
+            # against the taxonomy at all. Doing so minted a row from the prose
+            # in `buggy_rule` and then, via the exact-canonical fast path,
+            # collapsed every later correct submission -- in any topic -- onto
+            # that same row, where it showed up in students' misconception
+            # histories as a diagnosed error. A null misconception_id is the
+            # honest record: there is no misconception here to point at.
+            misconception_id, taxonomy_meta = None, None
+        else:
+            misconception_id, taxonomy_meta = await taxonomy.resolve_misconception(
+                self._conn,
+                self._client,
+                diagnosis=diagnosis,
+                model=self._settings.deepseek_model_fast,
+            )
         if taxonomy_meta is not None:
             # Only persisted when a real adjudication call happened -- the exact
             # canonical-match fast path and a failed call both report None, and
@@ -197,10 +216,20 @@ class Chain:
             session_id=session_id,
             diagnosis=diagnosis,
             misconception_id=misconception_id,
-            canonical_rule=taxonomy.canonicalize_rule(diagnosis.buggy_rule),
+            # No rule was diagnosed, so there is nothing to canonicalize --
+            # canonicalizing the "none" placeholder would write a junk
+            # canonical_rule that later queries could group on.
+            canonical_rule=(
+                "" if diagnosis.no_error_found else taxonomy.canonicalize_rule(diagnosis.buggy_rule)
+            ),
         )
 
-        status = "needs_clarification" if diagnosis.is_unclear else "diagnosed"
+        if diagnosis.no_error_found:
+            status = "correct"
+        elif diagnosis.is_unclear:
+            status = "needs_clarification"
+        else:
+            status = "diagnosed"
         repo.set_session_status(self._conn, session_id, status)
 
         yield ProgressEvent(

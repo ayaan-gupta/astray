@@ -52,7 +52,10 @@ def test_fixtures_diagnosis_is_pydantic_clean():
     payload = json.loads(FIXTURES["Diagnosis"])
     Diagnosis.model_validate(payload)
     # If extra="forbid" is violated, model_validate would raise. No fields added.
-    assert len(Diagnosis.model_fields) == 12
+    # 13 since `no_error_found` was added; bump deliberately, never to silence a
+    # failure -- a field added to Diagnosis without a matching prompt instruction
+    # is a field the model will never populate.
+    assert len(Diagnosis.model_fields) == 13
 
 
 def test_fixtures_match_decision_is_valid():

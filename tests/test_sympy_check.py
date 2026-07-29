@@ -352,3 +352,29 @@ async def test_run_check_async_does_not_block_the_event_loop():
     assert not gaps or max(gaps) < 0.3, (
         f"largest gap between ticks was {max(gaps):.3f}s - event loop was blocked"
     )
+
+
+def test_identical_sides_are_not_verified():
+    """`X == X` cannot fail, so it verifies nothing and must not report verified.
+
+    Regression: observed live on "simplify sqrt(x^2+9)", where the correct answer
+    is that the expression does not simplify, so the model emitted
+    lhs == rhs == "sqrt(x**2 + 9)". That reported verified=True and, because
+    verified_by_sympy is what lifts a diagnosis past the unverified confidence
+    ceiling, laundered an unchecked claim into a certified one at confidence 1.0.
+    """
+    result = run_check(SympyCheck(kind="equivalence", lhs="sqrt(x**2+9)", rhs="sqrt(x**2+9)"))
+    assert result.verified is False
+    assert "vacuous" in (result.detail or "")
+
+
+def test_identical_sides_detected_across_whitespace():
+    result = run_check(SympyCheck(kind="equivalence", lhs="(x + 1)**2", rhs="(x+1)**2"))
+    assert result.verified is False
+    assert "vacuous" in (result.detail or "")
+
+
+def test_genuine_equivalence_still_verifies():
+    """The vacuity guard must not reject real checks whose sides differ textually."""
+    result = run_check(SympyCheck(kind="equivalence", lhs="(x+1)**2", rhs="x**2 + 2*x + 1"))
+    assert result.verified is True

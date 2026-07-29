@@ -505,3 +505,88 @@ async def test_taxonomy_llm_error_through_chain_still_diagnoses_with_fallback_mi
     assert row["misconception_id"] is not None
     artifacts = repo.list_artifacts(conn, sid)
     assert [a["stage"] for a in artifacts] == ["s1_diagnose"]
+
+
+def _no_error_client() -> DeepSeekClient:
+    """Returns a diagnosis reporting the student's work was already correct.
+
+    Raises on any tool-call (strict) request, which is how these tests prove the
+    taxonomy adjudication call is never made -- not merely that its result went
+    unused.
+    """
+    payload = {
+        **DIAGNOSIS,
+        "no_error_found": True,
+        "divergence_index": None,
+        "buggy_rule": "none",
+        "misconception_statement": "Your solution is correct.",
+        "confidence": 0.98,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content).get("tools"):
+            raise AssertionError("taxonomy must not be consulted when no error was found")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": json.dumps(payload)},
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+            },
+        )
+
+    return DeepSeekClient("sk-test", transport=httpx.MockTransport(handler))
+
+
+async def test_correct_work_mints_no_misconception(tmp_path):
+    """Correct work must not create or match a taxonomy row.
+
+    Regression: the pipeline used to resolve every diagnosis against the
+    taxonomy, minting a row from the "none" placeholder in buggy_rule. Via the
+    exact-canonical fast path, every later correct submission -- in any topic --
+    then collapsed onto that one row and appeared in students' misconception
+    histories as a diagnosed error.
+    """
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    before = conn.execute("SELECT COUNT(*) AS n FROM misconceptions").fetchone()["n"]
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+
+    chain = Chain(conn, _no_error_client(), settings=_settings())
+    events = [e async for e in chain.run_diagnosis(sid, SUBMISSION)]
+
+    after = conn.execute("SELECT COUNT(*) AS n FROM misconceptions").fetchone()["n"]
+    assert after == before, "correct work must not mint a misconception"
+
+    row = conn.execute("SELECT * FROM diagnoses WHERE session_id = ?", (sid,)).fetchone()
+    assert row["misconception_id"] is None
+    assert row["canonical_rule"] == ""
+    assert (
+        conn.execute("SELECT status FROM sessions WHERE id = ?", (sid,)).fetchone()["status"]
+        == "correct"
+    )
+    assert events[-1].payload == {"status": "correct"}
+    assert events[-2].payload["misconception_id"] is None
+
+
+async def test_correct_work_records_no_taxonomy_artifact(tmp_path):
+    """No adjudication call happened, so no taxonomy ledger row may be written."""
+    conn = connect(tmp_path / "t.db")
+    seed(conn)
+    sid = repo.create_session(conn, handle="anon", submission=SUBMISSION)
+
+    chain = Chain(conn, _no_error_client(), settings=_settings())
+    [e async for e in chain.run_diagnosis(sid, SUBMISSION)]
+
+    stages = [
+        r["stage"]
+        for r in conn.execute(
+            "SELECT stage FROM run_artifacts WHERE session_id = ?", (sid,)
+        ).fetchall()
+    ]
+    assert "s1_diagnose_taxonomy" not in stages
