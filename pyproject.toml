@@ -1,5 +1,5 @@
 [project]
-name = "misconception-tutor"
+name = "astray"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -22,6 +22,11 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+# The design docs are a historical record of what the spec and plan literally
+# said during execution. Ruff formats Python blocks embedded in markdown, which
+# would silently rewrite that record -- and their code blocks are illustrative,
+# not compiled. Source, tests, and evals stay covered.
+exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

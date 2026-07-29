@@ -253,7 +253,7 @@ def create_app(
                 await aclose()
             app.state.conn.close()
 
-    app = FastAPI(title="Math Misconception Tutor", lifespan=_lifespan)
+    app = FastAPI(title="Astray", lifespan=_lifespan)
     # MaxBodySizeMiddleware is added first so CORSMiddleware ends up outermost
     # (Starlette's user-middleware list is built by inserting each new middleware
     # at the front, so the *last*-added one wraps the others). CORSMiddleware
