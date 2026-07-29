@@ -3,7 +3,15 @@ import json
 import httpx
 import pytest
 
-from server.llm.vision import GeminiVision, NullVision, VisionUnavailable
+from server.charter.contracts import Transcription
+from server.llm.vision import (
+    TRANSCRIBE_PROMPT,
+    GeminiVision,
+    NullVision,
+    VisionUnavailable,
+    _strip_math_delimiters,
+    normalize_transcription,
+)
 
 
 def _gemini_reply(payload: dict, prompt_tokens=1125, out_tokens=83):
@@ -207,3 +215,84 @@ async def test_timeout_raises_vision_unavailable():
 
     with pytest.raises(VisionUnavailable):
         await _client(handler).transcribe(b"x", "image/png")
+
+
+def test_strips_whole_line_math_delimiters():
+    """Same image, same prompt returned `$x^2 + 25 = 36$` once and bare text the
+    next time. The UI renders each step with KaTeX, so a wrapping `$` shows up as
+    a literal dollar sign in the field the student proofreads."""
+    cases = [
+        ("$x^2 + 25 = 36$", "x^2 + 25 = 36"),
+        ("$$x^{2} = 11$$", "x^{2} = 11"),
+        (r"\(y = \sin(3x)\)", r"y = \sin(3x)"),
+        (r"\[\frac{a}{b}\]", r"\frac{a}{b}"),
+        ("```latex\nx = 5\n```", "x = 5"),
+        ("  $x = 5$  ", "x = 5"),
+        ("x = 5", "x = 5"),
+    ]
+    for raw, expected in cases:
+        assert _strip_math_delimiters(raw) == expected, raw
+
+
+def test_unwrapped_lines_are_returned_byte_for_byte():
+    """ingest_photo promises zero transformation of a transcribed step, since
+    leading whitespace may be handwritten alignment the model preserved. Removing
+    packaging the prompt forbade is in scope; reformatting content is not."""
+    for raw in ("   x=4", "x=4   ", "  x = 5  ", "a$b"):
+        assert _strip_math_delimiters(raw) == raw
+
+
+def test_does_not_touch_delimiters_inside_a_line():
+    """A `$` mid-line is content (a word problem about money), not packaging."""
+    assert _strip_math_delimiters(r"cost = \$5 + \$3") == r"cost = \$5 + \$3"
+    assert _strip_math_delimiters("a$b") == "a$b"
+
+
+def test_nested_wrappers_unwrap_fully():
+    assert _strip_math_delimiters("$$ $x = 5$ $$") == "x = 5"
+
+
+def test_normalize_transcription_cleans_problem_and_steps():
+    t = Transcription(
+        problem="$Solve (x+5)^2 = 36$",
+        steps=["$x^2 + 25 = 36$", r"\(x^{2} = 11\)", "$$$$"],
+        confidence=1.0,
+    )
+    out = normalize_transcription(t)
+    assert out.problem == "Solve (x+5)^2 = 36"
+    # The empty `$$$$` step carried no content; keeping it would show the student
+    # a blank row to proofread.
+    assert out.steps == ["x^2 + 25 = 36", "x^{2} = 11"]
+    assert out.confidence == 1.0
+
+
+def test_prompt_forbids_delimiters_and_still_forbids_correcting_errors():
+    """The prompt used to say both 'character for character' and 'use LaTeX',
+    which are contradictory; the resolution must not weaken the do-not-correct
+    rule, which is the product-critical half."""
+    assert "$" in TRANSCRIBE_PROMPT and "Do NOT wrap" in TRANSCRIBE_PROMPT
+    assert "Do NOT correct errors" in TRANSCRIBE_PROMPT
+
+
+async def test_transcribe_applies_normalization_to_gemini_output():
+    """Pins the wiring, not just the helper: a delimited response from Gemini must
+    come back clean from transcribe(), because every consumer downstream -- the
+    confirm UI, the diagnose prompt, the stored artifact -- reads this one value."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_gemini_reply(
+                {
+                    "problem": "$Solve (x+5)^2 = 36$",
+                    "steps": ["$x^{2} + 25 = 36$", r"\(x = \sqrt{11}\)"],
+                    "confidence": 0.9,
+                    "unreadable": [],
+                }
+            ),
+        )
+
+    provider = GeminiVision("AQ.test", transport=httpx.MockTransport(handler))
+    transcription, _ = await provider.transcribe(b"png", "image/png")
+    assert transcription.problem == "Solve (x+5)^2 = 36"
+    assert transcription.steps == ["x^{2} + 25 = 36", r"x = \sqrt{11}"]

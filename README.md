@@ -74,13 +74,19 @@ Set `FAKE_LLM=1` to run against canned responses with no network and no cost.
 |---|---|---|
 | `GET` | `/api/health` | Liveness, plus whether vision input is configured |
 | `POST` | `/api/sessions` | Create a session from typed problem + work |
-| `POST` | `/api/sessions/{id}/photo` | Transcribe handwritten work into a submission |
+| `POST` | `/api/sessions/{id}/photo` | Transcribe handwritten work into the session |
+| `PUT` | `/api/sessions/{id}/submission` | Confirm/correct the transcription before diagnosis |
 | `GET` | `/api/sessions/{id}` | Session state and diagnosis, if ready |
 | `GET` | `/api/sessions/{id}/stream` | SSE: run the diagnosis, stream progress |
 
 `/stream` claims a session with a compare-and-swap, so concurrent connections
 cannot double-bill the same run; reconnecting to a finished session replays the
 stored result rather than re-running it.
+
+Photo input is never diagnosed until the student confirms it. Transcribed steps
+are delimiter-free LaTeX (`x^{2} + 25 = 36`, not `$x^{2} + 25 = 36$`), normalized
+server-side so the format does not vary between calls, and meant to be rendered
+with KaTeX in the review field.
 
 ## Development
 
