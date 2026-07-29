@@ -155,3 +155,96 @@ def get_diagnosis(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | No
         "SELECT * FROM diagnoses WHERE session_id = ? ORDER BY id DESC LIMIT 1",
         (session_id,),
     ).fetchone()
+
+
+def save_beats(conn: sqlite3.Connection, session_id: str, storyboard) -> None:
+    """Persist the planned beats for a session.
+
+    Written as soon as s6 plans them, before any render exists, so the beat rail
+    can show the upcoming beats greyed while the video is still rendering --
+    start_s/end_s stay NULL until a render measures them.
+
+    INSERT OR REPLACE keyed on (session_id, beat_id): a re-plan after a failed
+    render replaces the previous plan rather than accumulating orphan rows.
+    """
+    for index, item in enumerate(storyboard.beats):
+        conn.execute(
+            """INSERT OR REPLACE INTO beats
+                 (session_id, beat_id, idx, title, purpose, on_screen,
+                  targets_misconception, primitive, start_s, end_s)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                       (SELECT start_s FROM beats WHERE session_id=? AND beat_id=?),
+                       (SELECT end_s   FROM beats WHERE session_id=? AND beat_id=?))""",
+            (
+                session_id,
+                item.id,
+                index,
+                item.title,
+                item.teaching_purpose,
+                item.on_screen,
+                int(item.targets_misconception),
+                item.primitive,
+                session_id,
+                item.id,
+                session_id,
+                item.id,
+            ),
+        )
+
+
+def save_beat_timings(conn: sqlite3.Connection, session_id: str, timings) -> int:
+    """Write measured start/end onto already-planned beats. Returns rows updated.
+
+    Only UPDATEs: a timing for a beat that was never planned is discarded rather
+    than inserted, because an unplanned beat has no title or purpose and would
+    appear on the rail as a blank, unciteable segment. s8 already rejects scenes
+    that wrap unplanned beats, so reaching here means something upstream broke.
+    """
+    updated = 0
+    for timing in timings:
+        cur = conn.execute(
+            "UPDATE beats SET start_s = ?, end_s = ? WHERE session_id = ? AND beat_id = ?",
+            (timing.start, timing.end, session_id, timing.id),
+        )
+        updated += cur.rowcount
+    return updated
+
+
+def list_beats(conn: sqlite3.Connection, session_id: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM beats WHERE session_id = ? ORDER BY idx", (session_id,)
+    ).fetchall()
+
+
+def record_render(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    attempt: int,
+    status: str,
+    duration_s: float = 0.0,
+    error_text: str | None = None,
+    video_path: str | None = None,
+    mode: str = "generated",
+) -> int:
+    """Append one render attempt to the ledger.
+
+    Every attempt is a row, including failures: `renders.mode` distinguishes
+    generated from storyboard_fallback so the fallback rate is measurable, and
+    keeping failed attempts is what makes "how often does codegen work" a
+    question the data can answer.
+    """
+    cur = conn.execute(
+        """INSERT INTO renders
+             (session_id, attempt, status, duration_s, error_text, video_path, mode)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (session_id, attempt, status, duration_s, error_text, video_path, mode),
+    )
+    return int(cur.lastrowid)
+
+
+def latest_render(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM renders WHERE session_id = ? AND status = 'ok' ORDER BY id DESC LIMIT 1",
+        (session_id,),
+    ).fetchone()

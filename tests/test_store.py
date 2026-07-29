@@ -219,14 +219,18 @@ def test_migration_numbering_survives_an_appended_migration(tmp_path, monkeypatc
     from server.store import db
 
     path = tmp_path / "t.db"
-    connect(path).close()  # applies v1 only
+    connect(path).close()  # applies every migration currently defined
+    baseline = len(db.MIGRATIONS)
 
     extra_migration = "CREATE TABLE probe_v2 (id INTEGER PRIMARY KEY);"
     monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS + [extra_migration])
 
-    conn = connect(path)  # must apply only the appended v2 script
+    conn = connect(path)  # must apply only the appended script
 
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    # Derived from the list length, not hardcoded: this test is about the
+    # numbering mechanism, and pinning a literal makes it fail every time a
+    # genuine migration is appended -- exactly when it should still pass.
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == baseline + 1
     # v1 tables are untouched (no duplicate-table error) and v2 table exists.
     conn.execute("INSERT INTO probe_v2 (id) VALUES (1)")
     assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0

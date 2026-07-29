@@ -68,6 +68,47 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_diagnoses_session ON diagnoses(session_id);
     CREATE INDEX idx_diagnoses_misconception ON diagnoses(misconception_id);
     """,
+    # v2 -- Phase 2 rendering tables.
+    #
+    # `beats` is the grounding index: s6 plans the rows, the renderer fills in
+    # start_s/end_s from the container's measured manifest, and chat cites
+    # against them. start_s/end_s are nullable because a planned beat exists
+    # before it has ever been rendered -- the beat rail shows it greyed until
+    # the manifest lands, so "planned but untimed" has to be representable.
+    #
+    # PRIMARY KEY(session_id, beat_id) makes a duplicate beat id within one
+    # session a database error rather than a silently overwritten row, which
+    # matters because duplicate ids are exactly what s8's coverage check exists
+    # to catch: two beats sharing an id make every citation to that id ambiguous.
+    """
+    CREATE TABLE beats (
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        beat_id TEXT NOT NULL,
+        idx INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        purpose TEXT NOT NULL DEFAULT '',
+        on_screen TEXT NOT NULL DEFAULT '',
+        targets_misconception INTEGER NOT NULL DEFAULT 0,
+        primitive TEXT NOT NULL DEFAULT 'custom',
+        start_s REAL,
+        end_s REAL,
+        PRIMARY KEY (session_id, beat_id)
+    );
+    CREATE INDEX idx_beats_session_idx ON beats(session_id, idx);
+
+    CREATE TABLE renders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL,
+        duration_s REAL NOT NULL DEFAULT 0,
+        error_text TEXT,
+        video_path TEXT,
+        mode TEXT NOT NULL DEFAULT 'generated',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_renders_session ON renders(session_id);
+    """,
 ]
 
 

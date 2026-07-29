@@ -119,7 +119,14 @@ _TAXONOMY_STAGE = "s1_diagnose_taxonomy"
 
 
 class ProgressEvent(BaseModel):
-    type: Literal["stage_started", "stage_completed", "diagnosis_ready", "error", "done"]
+    type: Literal[
+        "stage_started",
+        "stage_completed",
+        "diagnosis_ready",
+        "render_complete",
+        "error",
+        "done",
+    ]
     stage: str | None = None
     payload: dict | None = None
     message: str | None = None
