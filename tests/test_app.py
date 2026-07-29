@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app import MAX_PROBLEM_CHARS, MAX_UPLOAD_BYTES, MAX_WORK_CHARS, create_app
+from server.charter.contracts import LlmCallMeta, Transcription
 from server.config import Settings
 from server.llm.deepseek import DeepSeekClient
 from server.llm.vision import GeminiVision
@@ -1143,3 +1144,132 @@ def test_work_at_the_cap_is_accepted(client):
         "/api/sessions", json={"handle": "t", "problem": "p", "work": "x" * MAX_WORK_CHARS}
     )
     assert response.status_code == 201
+
+
+class _StubVision:
+    """Vision provider returning a fixed transcription, with no network."""
+
+    def __init__(self, steps=("x^2 + 25 = 36", "x^2 = 11"), confidence=1.0, unreadable=()):
+        self._t = Transcription(
+            problem="Solve: (x + 5)^2 = 36",
+            steps=list(steps),
+            confidence=confidence,
+            unreadable=list(unreadable),
+        )
+
+    async def transcribe(self, image_bytes, mime_type):
+        return self._t, LlmCallMeta(
+            model="stub-vision", prompt_tokens=1, completion_tokens=1, cost_usd=0.0, attempts=1
+        )
+
+
+@pytest.fixture
+def photo_client(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        deepseek_api_key="sk-test",
+        db_path=tmp_path / "t.db",
+        media_root=tmp_path / "media",
+    )
+    app = create_app(
+        settings=settings,
+        client_factory=lambda: DeepSeekClient("sk-test", transport=httpx.MockTransport(_handler)),
+        vision_factory=_StubVision,
+    )
+    with TestClient(app) as c:
+        yield c
+
+
+def _new_photo_session(c):
+    return c.post(
+        "/api/sessions", json={"handle": "p", "problem": "Solve (x+5)^2 = 36.", "work": ""}
+    ).json()["session_id"]
+
+
+def test_photo_upload_writes_transcription_into_the_session(photo_client):
+    """Regression: /photo transcribed correctly but never wrote student_work_json.
+
+    /stream reads exactly that column, so a photo session was diagnosed as though
+    the student had submitted nothing -- the route logged an artifact, returned
+    JSON, and was otherwise a dead end.
+    """
+    sid = _new_photo_session(photo_client)
+    before = photo_client.get(f"/api/sessions/{sid}").json()["submission"]
+    assert before["steps"] == []
+
+    photo_client.post(f"/api/sessions/{sid}/photo", files={"file": ("a.png", b"img", "image/png")})
+
+    after = photo_client.get(f"/api/sessions/{sid}").json()["submission"]
+    assert after["steps"] == ["x^2 + 25 = 36", "x^2 = 11"]
+    assert after["source"] == "photo"
+    assert after["student_corrected"] is False
+
+
+def test_unconfirmed_photo_submission_cannot_be_diagnosed(photo_client):
+    """A transcription the student never checked must not reach the diagnoser."""
+    sid = _new_photo_session(photo_client)
+    photo_client.post(f"/api/sessions/{sid}/photo", files={"file": ("a.png", b"img", "image/png")})
+
+    response = photo_client.get(f"/api/sessions/{sid}/stream")
+    assert response.status_code == 409
+    assert "confirmed" in response.json()["detail"]
+    # The gate must run before the compare-and-swap, or the session is left claimed
+    # at in_progress with no run behind it and is permanently unreachable.
+    assert photo_client.get(f"/api/sessions/{sid}").json()["status"] == "created"
+
+
+def test_confirming_transcription_unblocks_diagnosis(photo_client):
+    sid = _new_photo_session(photo_client)
+    photo_client.post(f"/api/sessions/{sid}/photo", files={"file": ("a.png", b"img", "image/png")})
+
+    confirmed = photo_client.put(
+        f"/api/sessions/{sid}/submission",
+        json={"problem": "Solve (x + 5)^2 = 36", "work": "x^2 + 25 = 36\nx^2 = 11"},
+    )
+    assert confirmed.status_code == 200
+    body = confirmed.json()["submission"]
+    assert body["student_corrected"] is True
+    assert body["source"] == "photo", "confirming must not erase how the work was captured"
+
+    response = photo_client.get(f"/api/sessions/{sid}/stream")
+    assert response.status_code == 200
+
+
+def test_student_corrections_are_what_gets_diagnosed(photo_client):
+    """The corrected text, not the raw transcription, must reach the diagnoser."""
+    sid = _new_photo_session(photo_client)
+    photo_client.post(f"/api/sessions/{sid}/photo", files={"file": ("a.png", b"img", "image/png")})
+    photo_client.put(
+        f"/api/sessions/{sid}/submission",
+        json={"problem": "Solve (x + 5)^2 = 36", "work": "x^2 + 10x + 25 = 36\nx = 1"},
+    )
+    stored = photo_client.get(f"/api/sessions/{sid}").json()["submission"]
+    assert stored["steps"] == ["x^2 + 10x + 25 = 36", "x = 1"]
+    assert "x^2 = 11" not in stored["steps"]
+
+
+def test_submission_is_frozen_once_a_run_has_started(photo_client):
+    """Rewriting work mid-run would leave the stored diagnosis describing work
+    that no longer exists in the row."""
+    sid = photo_client.post(
+        "/api/sessions", json={"handle": "p", "problem": "Expand (x+3)^2.", "work": "x^2+9"}
+    ).json()["session_id"]
+    photo_client.get(f"/api/sessions/{sid}/stream")  # runs to completion
+
+    response = photo_client.put(
+        f"/api/sessions/{sid}/submission", json={"problem": "different", "work": "different"}
+    )
+    assert response.status_code == 409
+
+
+def test_confirm_on_unknown_session_404s(photo_client):
+    response = photo_client.put("/api/sessions/nope/submission", json={"problem": "p", "work": "w"})
+    assert response.status_code == 404
+
+
+def test_typed_sessions_are_diagnosable_without_confirmation(photo_client):
+    """The gate is scoped to photo input; typed work is authored by the student."""
+    sid = photo_client.post(
+        "/api/sessions", json={"handle": "p", "problem": "Expand (x+3)^2.", "work": "x^2+9"}
+    ).json()["session_id"]
+    assert photo_client.get(f"/api/sessions/{sid}/stream").status_code == 200

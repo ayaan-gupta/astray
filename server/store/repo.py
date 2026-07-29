@@ -55,6 +55,35 @@ def try_start_session(conn: sqlite3.Connection, session_id: str) -> bool:
     return cur.rowcount == 1
 
 
+def update_submission(
+    conn: sqlite3.Connection, session_id: str, submission: StudentSubmission
+) -> bool:
+    """Replace a session's stored submission, but only while it is still ``created``.
+
+    Every write of ``student_work_json`` goes through here so the three columns
+    derived from a submission (``input_mode``, ``problem``, ``student_work_json``)
+    can never drift apart -- a photo transcription carries its own ``problem``
+    text, which is usually not the placeholder typed at create time.
+
+    The ``status = 'created'`` predicate is the important part, and it is in the
+    UPDATE rather than a preceding read for the same reason ``try_start_session``
+    is: a read-then-write leaves a window in which a concurrent ``/stream`` claims
+    the session and begins diagnosing while this call is rewriting the very work
+    being diagnosed. Once a run has started, the submission is frozen -- otherwise
+    the persisted diagnosis would describe work that no longer exists in the row.
+
+    Returns ``True`` if the row was updated, ``False`` if the session was missing
+    or no longer ``created`` (the caller decides whether that is a 404 or a 409).
+    """
+    cur = conn.execute(
+        """UPDATE sessions
+              SET input_mode = ?, problem = ?, student_work_json = ?
+            WHERE id = ? AND status = 'created'""",
+        (submission.source, submission.problem, submission.model_dump_json(), session_id),
+    )
+    return cur.rowcount == 1
+
+
 def record_artifact(
     conn: sqlite3.Connection,
     *,

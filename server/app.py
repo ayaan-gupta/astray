@@ -214,6 +214,25 @@ class CreateSessionRequest(BaseModel):
         return value
 
 
+class ConfirmSubmissionRequest(BaseModel):
+    """The student's reviewed version of their work, as edited in the UI.
+
+    Same shape and same caps as CreateSessionRequest minus `handle`, since this
+    replaces the same three fields on an existing session.
+    """
+
+    problem: str = Field(max_length=MAX_PROBLEM_CHARS)
+    work: str = Field(default="", max_length=MAX_WORK_CHARS)
+    prose: str | None = Field(default=None, max_length=MAX_PROSE_CHARS)
+
+    @field_validator("problem")
+    @classmethod
+    def problem_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("problem must not be blank")
+        return value
+
+
 def create_app(
     *,
     settings: Settings | None = None,
@@ -338,10 +357,63 @@ def create_app(
             payload=submission.model_dump(),
             meta=meta,
         )
+        # The transcription becomes the session's work. Without this the route was a
+        # dead end: it transcribed correctly, logged an artifact, returned JSON, and
+        # left `student_work_json` at whatever was typed at create time -- so /stream,
+        # which reads exactly that column, diagnosed empty work and told a student who
+        # had just photographed their solution that they had not shown any work.
+        if not repo.update_submission(conn_of(request), session_id, submission):
+            # Not `created` any more: a run already claimed this session, and the
+            # submission it is diagnosing must not change underneath it.
+            raise HTTPException(
+                status_code=409, detail="session already started; cannot replace its work"
+            )
         return {
             "transcription": submission.model_dump(),
             "needs_review": needs_review(submission),
+            # Photo work is never diagnosed until confirmed via PUT .../submission,
+            # regardless of how confident the vision model was. `needs_review` says
+            # whether the UI must *highlight* problems; this says the confirm step is
+            # required either way.
+            "confirmation_required": True,
         }
+
+    @app.put("/api/sessions/{session_id}/submission")
+    def confirm_submission(session_id: str, body: ConfirmSubmissionRequest, request: Request):
+        """Accept the student's reviewed/corrected work and mark it confirmed.
+
+        This is the step that makes a photo submission diagnosable. `ingest_photo`
+        deliberately sets `student_corrected=False` and documents that only the
+        student-confirmation flow may set it True -- this is that flow. A bad
+        transcription diagnosed unchallenged would pin a misconception on a student
+        for an error the vision model invented, which is the single worst failure
+        this product can produce.
+        """
+        connection = conn_of(request)
+        row = repo.get_session(connection, session_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        previous = StudentSubmission.model_validate_json(row["student_work_json"])
+        corrected = ingest_typed(problem=body.problem, work=body.work, prose=body.prose)
+        submission = corrected.model_copy(
+            update={
+                # `source` records how the work was *captured*, which confirming does
+                # not change -- a corrected photo transcription is still photo input,
+                # and flattening it to "typed" would erase that from the record.
+                "source": previous.source,
+                "student_corrected": True,
+                "transcription_confidence": previous.transcription_confidence,
+                # The student has now read every line, so nothing remains unreadable;
+                # whatever they could not make out they have either fixed or removed.
+                "unreadable": [],
+            }
+        )
+        if not repo.update_submission(connection, session_id, submission):
+            raise HTTPException(
+                status_code=409, detail="session already started; cannot replace its work"
+            )
+        return {"submission": submission.model_dump(), "needs_review": needs_review(submission)}
 
     @app.get("/api/sessions/{session_id}")
     def get_session(session_id: str, request: Request) -> dict:
@@ -406,6 +478,27 @@ def create_app(
         row = repo.get_session(connection, session_id)
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")
+
+        # Gate BEFORE the compare-and-swap below: failing after it would leave the
+        # session claimed at `in_progress` with no run behind it, permanently
+        # unreachable. An unconfirmed photo transcription must never be diagnosed --
+        # `ingest_photo` sets student_corrected=False and documents that only the
+        # confirmation flow may set it True. Diagnosing a transcription the student
+        # never checked risks pinning a misconception on them for an error the vision
+        # model invented, which is worse than any latency this gate costs. The gate is
+        # unconditional for photo input rather than keyed on `needs_review`: a model
+        # can misread a line and still report high confidence, so confidence alone is
+        # not evidence the student was ever shown what will be diagnosed.
+        if row["status"] == "created":
+            pending = StudentSubmission.model_validate_json(row["student_work_json"])
+            if pending.source == "photo" and not pending.student_corrected:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "photo transcription must be confirmed before diagnosis; "
+                        f"PUT /api/sessions/{session_id}/submission with the reviewed work"
+                    ),
+                )
 
         # A compare-and-swap (UPDATE ... WHERE status = 'created'), not a
         # read-then-write: reading `row["status"]` above and separately checking
