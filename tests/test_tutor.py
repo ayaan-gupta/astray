@@ -133,6 +133,73 @@ def test_latex_delimiters_are_unwrapped(raw, expected):
     assert chat.strip_latex_delimiters(raw) == expected
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("in [beat:b4] — it shows the gap", "in [beat:b4], it shows the gap"),
+        ("**[beat:b4]** — It puts them side by side", "**[beat:b4]**. It puts them side by side"),
+        ("you get 10 – the correct value is 16", "you get 10, the correct value is 16"),
+        ("- first\n— second", "- first\n- second"),
+        ("that is wrong. — Try again", "that is wrong. Try again"),
+        ("side‑by‑side", "side-by-side"),
+        ("no dashes at all", "no dashes at all"),
+        ("a - b stays a hyphen", "a - b stays a hyphen"),
+    ],
+    ids=[
+        "parenthetical-becomes-comma",
+        "clause-end-becomes-full-stop",
+        "en-dash-too",
+        "line-opening-dash-stays-a-bullet",
+        "no-doubled-punctuation",
+        "non-breaking-hyphen-becomes-ascii",
+        "already-clean",
+        "ascii-hyphen-untouched",
+    ],
+)
+def test_em_dashes_are_replaced_with_safe_punctuation(raw, expected):
+    """The student never typed an em dash and should never be shown one."""
+    assert chat.strip_em_dashes(raw) == expected
+
+
+@pytest.mark.parametrize("dash", ["—", "–", "―"])
+def test_em_dashes_never_become_a_hyphen(dash):
+    """The load-bearing case. This is a maths tutor, so substituting a hyphen
+    would turn a sentence break into what looks like subtraction: `y - 3` is a
+    real expression, and the student cannot tell which was meant."""
+    cleaned = chat.strip_em_dashes(f"take y {dash} 3 is not what you want")
+    assert dash not in cleaned
+    assert "y - 3" not in cleaned, "a dash between operands must not become a minus sign"
+    assert cleaned == "take y, 3 is not what you want"
+
+
+async def test_answer_strips_em_dashes_before_persisting(tmp_path):
+    """Sanitising on the way in matters more than on the way out: the reply is
+    stored, and chat history is replayed to the client verbatim on reload."""
+    conn = connect(tmp_path / "t.db")
+    sid = _session(conn)
+    repo.save_beats(conn, sid, _board())
+
+    reply, _, _ = await chat.answer(
+        conn,
+        _client("Look at [beat:b2] — it shows the missing term."),
+        session_id=sid,
+        question="why?",
+        model="deepseek-v4-flash",
+    )
+    assert "—" not in reply
+    assert reply == "Look at [beat:b2], it shows the missing term."
+    assert "—" not in repo.list_chat(conn, sid)[1]["content"]
+
+
+def test_prompt_forbids_em_dashes():
+    """The sanitiser is the net; the prompt is the primary fix, because prose
+    written without a dash reads better than prose with one substituted out."""
+    conn = connect(":memory:")
+    sid = _session(conn)
+    prompt = chat.build_prompt(repo.get_diagnosis(conn, sid), [], "q")
+    assert "em dash" in prompt
+
+
 async def test_answer_persists_validated_citations_only(tmp_path):
     conn = connect(tmp_path / "t.db")
     sid = _session(conn)

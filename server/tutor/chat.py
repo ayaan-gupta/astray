@@ -46,6 +46,21 @@ BARE_CITATION_RE = re.compile(r"\[(b[0-9]+)\]")
 # it does not comply, the same belt-and-braces the transcription path uses.
 INLINE_LATEX_RE = re.compile(r"\\\((.+?)\\\)|\\\[(.+?)\\\]", re.DOTALL)
 
+# Em, en and horizontal-bar dashes, with any spaces around them. Only spaces and
+# tabs are consumed, never a newline: a dash that opens a line is a bullet
+# marker and has to stay one, and swallowing the newline would splice it into
+# the previous line.
+EM_DASH_RE = re.compile(r"[ \t]*[—–―][ \t]*")
+
+# U+2011 is a real hyphen that happens to be non-breaking, so unlike the dashes
+# above it needs a hyphen back, not sentence punctuation. It shows up inside
+# words the model hyphenates, as in "side-by-side".
+NB_HYPHEN_RE = re.compile("‑")
+
+# Punctuation that already closes a clause. A dash right after one of these is
+# decoration, so it collapses to a space instead of doubling the mark.
+CLAUSE_END = (".", "!", "?", ":", ";", ",")
+
 # Enough context to be useful, bounded so a long conversation cannot grow the
 # prompt without limit. The diagnosis and manifest are re-sent every turn, so
 # older turns matter less than they would in an ungrounded chat.
@@ -88,8 +103,8 @@ def build_prompt(diagnosis_row: sqlite3.Row, beat_rows: list[sqlite3.Row], quest
         "Be brief and concrete. You already know what they got wrong, so do not re-ask. "
         "Never tell the student their wrong answer was right.\n\n"
         "Write maths as plain text in backticks, like `(a+b)^2 = a^2 + 2ab + b^2`. Do not use "
-        "LaTeX delimiters -- the reply is shown as text, so they appear as literal backslashes."
-        "\n\n"
+        "LaTeX delimiters -- the reply is shown as text, so they appear as literal backslashes.\n\n"
+        "Never use an em dash or an en dash. Use a comma, a full stop, or a colon instead.\n\n"
         f"Their diagnosed misconception: {_neutralize_markers(diagnosis_row['buggy_rule'])}\n"
         f"Stated for them as: {_neutralize_markers(diagnosis_row['statement'])}\n"
         f"The correct solution: {solution}\n\n"
@@ -104,6 +119,29 @@ def build_prompt(diagnosis_row: sqlite3.Row, beat_rows: list[sqlite3.Row], quest
 def strip_latex_delimiters(text: str) -> str:
     r"""Unwrap `\(...\)` and `\[...\]`, keeping the expression inside."""
     return INLINE_LATEX_RE.sub(lambda m: (m.group(1) or m.group(2)).strip(), text)
+
+
+def strip_em_dashes(text: str) -> str:
+    """Replace em and en dashes with punctuation that cannot read as a minus.
+
+    A hyphen is the obvious substitution and the one thing this must never do:
+    this is a maths tutor, so `y - 3` in the middle of a sentence about `y - 3`
+    is genuinely ambiguous. What the dash is doing decides the replacement
+    instead. Before a capital it was ending a clause, so a full stop is right;
+    anywhere else it was a parenthetical break, where a comma reads naturally.
+    """
+
+    def replace(match: re.Match) -> str:
+        before, after = text[: match.start()], text[match.end() :]
+        if not after:
+            return ""
+        if not before or before.endswith("\n"):
+            return "- "  # opening a line: a bullet marker, not punctuation
+        if before.endswith(CLAUSE_END):
+            return " "
+        return ". " if after[0].isupper() else ", "
+
+    return NB_HYPHEN_RE.sub("-", EM_DASH_RE.sub(replace, text))
 
 
 def validate_citations(text: str, known_beat_ids: set[str]) -> tuple[str, list[str]]:
@@ -165,7 +203,7 @@ async def answer(
         messages.append({"role": row["role"], "content": row["content"]})
 
     raw, meta = await client.complete_text(messages=messages, model=model)
-    reply, cited = validate_citations(strip_latex_delimiters(raw), known)
+    reply, cited = validate_citations(strip_em_dashes(strip_latex_delimiters(raw)), known)
 
     repo.save_chat_message(conn, session_id=session_id, role="user", content=question)
     repo.save_chat_message(

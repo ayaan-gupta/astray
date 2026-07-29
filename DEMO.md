@@ -65,8 +65,8 @@ displays it and `/api/insights` never returns it.
    animation show my rule failing?"*: the tutor separates where the rule is
    **shown** (0:11 Buggy Rule Applied) from where it is **refuted**
    (0:16 Side-by-Side Comparison, 0:23 Concrete Check). Click
-   **0:23 — Concrete Check with y=1** — the player jumps to 23.25s against that
-   beat's measured start of 23.2s, and the rail's active chip follows.
+   **▶ 0:23 · Concrete Check with y=1** and the player jumps to 23.25s against
+   that beat's measured start of 23.2s, with the rail's active chip following.
 5. **Insights** — `/#/insights`. *Your patterns* 1×, *Across everyone*
    **2 students**. The peer is a different student who submitted `(x + 5)^2`,
    a different problem in different letters that canonicalised onto the same
