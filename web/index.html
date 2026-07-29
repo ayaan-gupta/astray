@@ -4,88 +4,136 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Astray — find where your reasoning went astray</title>
+<link rel="icon" href="/astray-mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 <script defer src="/app.js"></script>
 </head>
 <body>
-<header>
-  <a class="brand" href="#/">Astray<span class="dot">.</span></a>
-  <nav>
+<a class="skip" href="#view">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="#/"><img src="/astray-wordmark.svg" alt="Astray home" width="86" height="26"></a>
+  <nav class="nav" aria-label="Sections">
     <a href="#/" data-nav="submit">Submit</a>
     <a href="#/insights" data-nav="insights">Insights</a>
   </nav>
 </header>
 
-<main id="view"></main>
+<main id="view" tabindex="-1"></main>
 
 <!-- ---------------------------------------------------------------- SUBMIT -->
 <template id="tpl-submit">
-  <section class="pane narrow">
-    <h1>Where did it go wrong?</h1>
-    <p class="lede">Give us the problem and your own attempt — mistakes included.
-      Astray finds the exact step your reasoning left the correct path, then animates that moment.</p>
-
-    <div class="tabs">
-      <button class="tab is-active" data-tab="typed">Type it</button>
-      <button class="tab" data-tab="photo">Photograph it</button>
+  <section class="pane pane-narrow">
+    <div class="hero">
+      <p class="eyebrow">Misconception tutor</p>
+      <h1 class="display">Where did it go wrong?</h1>
+      <p class="lede">Give Astray the problem and your own attempt — mistakes included. It finds
+        the exact step your reasoning left the correct path, names the false rule behind it, and
+        animates that moment.</p>
     </div>
 
-    <form id="form-typed" class="tabpanel">
-      <label>Problem
-        <input name="problem" required placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
-      </label>
-      <label>Your working — one step per line
-        <textarea name="work" rows="6" placeholder="(x+5)^2&#10;= x^2 + 25"></textarea>
-      </label>
-      <button class="primary" type="submit">Diagnose my work</button>
-    </form>
-
-    <form id="form-photo" class="tabpanel hidden">
-      <label>Problem
-        <input name="problem" required placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
-      </label>
-      <label class="drop" id="drop">
-        <input type="file" name="file" accept="image/*" hidden>
-        <span>Drop a photo of your handwritten work, or click to choose</span>
-      </label>
-      <div id="review" class="hidden">
-        <h3>Check the transcription</h3>
-        <p class="hint">We read your photo as the lines below. Fix anything we got wrong —
-          this is what gets diagnosed, so it has to be what you actually wrote.</p>
-        <div id="review-lines"></div>
-        <button class="primary" id="confirm-btn" type="button">This is my work — diagnose it</button>
+    <div class="panel">
+      <div class="tabs" role="tablist" aria-label="How to send your work">
+        <button class="tab is-active" role="tab" id="tab-typed" aria-selected="true"
+                aria-controls="form-typed" data-tab="typed" type="button">Type it</button>
+        <button class="tab" role="tab" id="tab-photo" aria-selected="false" tabindex="-1"
+                aria-controls="form-photo" data-tab="photo" type="button">Photograph it</button>
       </div>
-    </form>
-    <p class="err" id="submit-err"></p>
+
+      <form id="form-typed" class="tabpanel" role="tabpanel" aria-labelledby="tab-typed">
+        <div class="field">
+          <label class="field-label" for="typed-problem">Problem</label>
+          <input id="typed-problem" name="problem" class="mono" required
+                 placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="typed-work">Your working</label>
+          <p class="field-hint" id="typed-work-hint">One step per line, exactly as you wrote it.</p>
+          <textarea id="typed-work" name="work" class="mono" rows="6"
+                    aria-describedby="typed-work-hint" placeholder="(x+5)^2&#10;= x^2 + 25"></textarea>
+        </div>
+        <button class="btn btn-primary" type="submit">Diagnose my work</button>
+      </form>
+
+      <form id="form-photo" class="tabpanel hidden" role="tabpanel" aria-labelledby="tab-photo">
+        <div class="field">
+          <label class="field-label" for="photo-problem">Problem</label>
+          <input id="photo-problem" name="problem" class="mono" required
+                 placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="photo-file">Your working</label>
+          <input type="file" id="photo-file" name="file" accept="image/*" class="sr-only">
+          <label class="drop" id="drop" for="photo-file">
+            <span class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2.5"></rect>
+                <path d="M3 15.5l4.5-4a2 2 0 0 1 2.7 0L16 17"></path>
+                <circle cx="15.5" cy="9" r="1.6"></circle>
+              </svg>
+            </span>
+            <span class="drop-text" id="drop-text">Drop a photo of your handwritten work,
+              or choose a file</span>
+            <span class="drop-sub">JPG, PNG or HEIC</span>
+          </label>
+        </div>
+
+        <div id="review" class="review hidden">
+          <h2 class="panel-title">Check the transcription</h2>
+          <p class="field-hint">Astray read your photo as the lines below. Fix anything it got
+            wrong — this is what gets diagnosed, so it has to be what you actually wrote.</p>
+          <div id="review-lines" class="review-lines"></div>
+          <button class="btn btn-primary" id="confirm-btn" type="button">Diagnose this work</button>
+        </div>
+      </form>
+
+      <p class="err" id="submit-err" role="alert"></p>
+    </div>
   </section>
 </template>
 
 <!-- --------------------------------------------------------------- SESSION -->
 <template id="tpl-session">
   <section class="pane">
-    <div id="diagnosis" class="card diagnosis pending">
-      <div class="spinner"></div>
-      <p class="muted">Reading your working…</p>
+    <div id="diagnosis" class="panel diagnosis is-pending">
+      <span class="spinner" aria-hidden="true"></span>
+      <p class="ink-2">Reading your working…</p>
     </div>
 
-    <div class="theater">
+    <div class="theatre">
       <div class="stage">
-        <div id="player-wrap" class="player empty">
-          <div class="pipeline" id="pipeline">
-            <ol id="stage-list"></ol>
+        <div id="player-wrap" class="player is-empty">
+          <div class="pipeline" id="pipeline" role="status">
+            <p class="eyebrow"><img class="eyebrow-mark" src="/astray-mark.svg" alt="" width="14" height="14">Building your animation</p>
+            <ol id="stage-list" class="stages"></ol>
           </div>
         </div>
-        <div id="rail" class="rail"></div>
+        <div class="rail-wrap">
+          <div id="rail" class="rail" role="group" aria-label="Moments in the animation"></div>
+        </div>
       </div>
 
-      <aside class="chat">
-        <h3>Ask about it</h3>
-        <div id="messages" class="messages"></div>
-        <form id="chat-form">
+      <aside class="panel chat" aria-labelledby="chat-title">
+        <h2 class="panel-title" id="chat-title">Ask about it</h2>
+        <div id="messages" class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+        <div id="chat-empty" class="chat-empty">
+          <p class="chat-empty-title">Answers point at the animation</p>
+          <p class="field-hint">Every reply cites the moment it is talking about, so you can jump
+            straight there.</p>
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+        <form id="chat-form" class="composer">
+          <label class="sr-only" for="chat-input">Ask a question about your mistake</label>
           <input id="chat-input" placeholder="Why doesn't that work?" autocomplete="off" disabled>
-          <button class="primary" type="submit" disabled>Send</button>
+          <button class="btn btn-primary btn-send" type="submit" disabled aria-label="Send question">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h13M12 5l7 7-7 7"></path>
+            </svg>
+          </button>
         </form>
-        <p class="hint" id="chat-hint">Chat opens as soon as the diagnosis lands — you don't
+        <p class="field-hint" id="chat-hint">Chat opens as soon as the diagnosis lands — you don't
           have to wait for the animation.</p>
       </aside>
     </div>
@@ -94,14 +142,23 @@
 
 <!-- -------------------------------------------------------------- INSIGHTS -->
 <template id="tpl-insights">
-  <section class="pane narrow">
-    <h1>What people get wrong</h1>
-    <p class="lede">Every diagnosis is canonicalised onto a shared misconception, so the same
-      error made with different letters counts once. Nothing here identifies anyone.</p>
-    <h2>Your patterns</h2>
-    <div id="history"></div>
-    <h2>Across everyone</h2>
-    <div id="frequency"></div>
+  <section class="pane pane-narrow">
+    <div class="hero">
+      <p class="eyebrow">Insights</p>
+      <h1 class="display">What people get wrong</h1>
+      <p class="lede">Every diagnosis is canonicalised onto a shared misconception, so the same
+        error made with different letters counts once. Nothing here identifies anyone.</p>
+    </div>
+
+    <section class="panel" aria-labelledby="h-history">
+      <h2 class="panel-title" id="h-history">Your patterns</h2>
+      <div id="history"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-frequency">
+      <h2 class="panel-title" id="h-frequency">Across everyone</h2>
+      <div id="frequency"></div>
+    </section>
   </section>
 </template>
 </body>

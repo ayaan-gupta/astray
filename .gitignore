@@ -24,3 +24,7 @@ media_manim/
 
 # subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
+
+# vendored design skills -- restore with `npx skills experimental_install`,
+# pinned by hash in skills-lock.json. Third-party content, not ours to carry.
+.claude/skills/

@@ -70,6 +70,27 @@ model-authored code at all.
 Upstream error text never reaches a client — a DeepSeek error body once reflected
 the `Authorization` header straight through to the SSE stream.
 
+**Model text is rendered, never injected.** The tutor writes markdown. The
+client tokenises it and builds the elements itself, so bullets, bold and inline
+code become real formatting without a reply ever being parsed as markup.
+
+## The interface
+
+One dark appearance, because every screen frames a Manim render on black and a
+light shell around it reads as a hole in the page. Colour is OKLCH, and two
+hues carry meaning: coral is the misconception and the one primary action per
+view, green means a machine checked it. Everything else is neutral, so a
+coloured pixel always means something.
+
+Every foreground/background pair is measured rather than eyeballed. `--ink-2`
+clears APCA Lc 75 on all three surfaces, `--ink-3` clears 60, and the accent
+sits at lightness 0.780 for an unobvious reason: a saturated warm hue has very
+little contrast headroom, and that is the lightness where a near-black label on
+the filled button finally clears 60. No lightness of that hue reaches 75.
+`--line-control` is much brighter than the other hairlines because it is the
+only thing that says "you can type here", so it holds a real 3:1 against both
+the field fill and the panel behind it.
+
 ## Running it
 
 Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
@@ -125,4 +146,5 @@ Rendering needs Docker and `manimcommunity/manim:stable`. Set `RENDER_ENABLED=0`
 to plan animations without running containers — the pipeline still produces beats,
 so chat stays grounded by title.
 
-Design and plan documents live in `docs/superpowers/`.
+Design and plan documents live in `docs/superpowers/`. `DEMO.md` names the
+prepared session to open, and what is and is not live in it.
