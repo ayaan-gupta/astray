@@ -99,6 +99,40 @@ def test_citation_validation(text, expected_text, expected_cited):
     assert cited == expected_cited
 
 
+@pytest.mark.parametrize(
+    "text,expected_text,expected_cited",
+    [
+        ("See [b2].", "See [beat:b2].", ["b2"]),
+        ("Compare [b1] with [beat:b3].", "Compare [beat:b1] with [beat:b3].", ["b1", "b3"]),
+        ("Look at [b9].", "Look at [b9].", []),
+    ],
+    ids=["promoted", "mixed-forms", "unknown-id-left-alone"],
+)
+def test_shorthand_citations_are_promoted_when_the_beat_exists(text, expected_text, expected_cited):
+    """The model writes `[b3]` often enough that treating it as prose loses real
+    citations: no chip, no seek, and a literal `[b3]` left in the reply. An id
+    that names no beat is not promoted -- it stays as written."""
+    cleaned, cited = chat.validate_citations(text, {"b1", "b2", "b3"})
+    assert cleaned == expected_text
+    assert cited == expected_cited
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (r"gives \(y^2 + 9\) exactly", "gives y^2 + 9 exactly"),
+        (r"so \[a^2 + 2ab + b^2\] follows", "so a^2 + 2ab + b^2 follows"),
+        (r"both \(x\) and \(y\)", "both x and y"),
+        ("plain `y^2 + 9` text", "plain `y^2 + 9` text"),
+    ],
+    ids=["inline", "display", "repeated", "already-plain"],
+)
+def test_latex_delimiters_are_unwrapped(raw, expected):
+    """Replies render as text, so a delimiter reaches the student as literal
+    backslashes. Keep the expression, drop the wrapper."""
+    assert chat.strip_latex_delimiters(raw) == expected
+
+
 async def test_answer_persists_validated_citations_only(tmp_path):
     conn = connect(tmp_path / "t.db")
     sid = _session(conn)

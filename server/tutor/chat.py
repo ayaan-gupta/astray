@@ -32,6 +32,20 @@ logger = logging.getLogger(__name__)
 
 CITATION_RE = re.compile(r"\[beat:(b[0-9]+)\]")
 
+# The model reaches for the shorter `[b3]` often enough to matter, and when it
+# does the whole grounding contract degrades silently: no chip, no seek, and a
+# literal `[b3]` left sitting in the prose. Promoting the short form is safe
+# precisely because it is promoted only when the id names a beat that exists in
+# this session's manifest -- an unknown `[b9]` is left exactly as written and
+# then falls through to the same stripping every other bad citation gets.
+BARE_CITATION_RE = re.compile(r"\[(b[0-9]+)\]")
+
+# Replies are rendered as text, not typeset. LaTeX delimiters therefore reach
+# the student as literal backslashes, so they are removed and the expression
+# inside is kept. The prompt asks for plain text too; this is the net for when
+# it does not comply, the same belt-and-braces the transcription path uses.
+INLINE_LATEX_RE = re.compile(r"\\\((.+?)\\\)|\\\[(.+?)\\\]", re.DOTALL)
+
 # Enough context to be useful, bounded so a long conversation cannot grow the
 # prompt without limit. The diagnosis and manifest are re-sent every turn, so
 # older turns matter less than they would in an ungrounded chat.
@@ -73,6 +87,9 @@ def build_prompt(diagnosis_row: sqlite3.Row, beat_rows: list[sqlite3.Row], quest
         "timestamps; refer to beats by id and let the player resolve the time.\n\n"
         "Be brief and concrete. You already know what they got wrong, so do not re-ask. "
         "Never tell the student their wrong answer was right.\n\n"
+        "Write maths as plain text in backticks, like `(a+b)^2 = a^2 + 2ab + b^2`. Do not use "
+        "LaTeX delimiters -- the reply is shown as text, so they appear as literal backslashes."
+        "\n\n"
         f"Their diagnosed misconception: {_neutralize_markers(diagnosis_row['buggy_rule'])}\n"
         f"Stated for them as: {_neutralize_markers(diagnosis_row['statement'])}\n"
         f"The correct solution: {solution}\n\n"
@@ -84,13 +101,25 @@ def build_prompt(diagnosis_row: sqlite3.Row, beat_rows: list[sqlite3.Row], quest
     )
 
 
+def strip_latex_delimiters(text: str) -> str:
+    r"""Unwrap `\(...\)` and `\[...\]`, keeping the expression inside."""
+    return INLINE_LATEX_RE.sub(lambda m: (m.group(1) or m.group(2)).strip(), text)
+
+
 def validate_citations(text: str, known_beat_ids: set[str]) -> tuple[str, list[str]]:
     """Strip citations naming unknown beats; return cleaned text and valid ids.
 
     Stripping rather than rewriting: a dead chip is worse than prose without a
     chip, and silently remapping to a nearby beat would point the student at a
-    moment the tutor did not mean.
+    moment the tutor did not mean. The one rewrite allowed is promoting the
+    model's shorthand `[b3]` to the real form, and only for an id this session
+    actually has -- that is the same identity, written shorter, not a guess at
+    which moment was meant.
     """
+    text = BARE_CITATION_RE.sub(
+        lambda m: f"[beat:{m.group(1)}]" if m.group(1) in known_beat_ids else m.group(0),
+        text,
+    )
     cited: list[str] = []
 
     def replace(match: re.Match) -> str:
@@ -136,7 +165,7 @@ async def answer(
         messages.append({"role": row["role"], "content": row["content"]})
 
     raw, meta = await client.complete_text(messages=messages, model=model)
-    reply, cited = validate_citations(raw, known)
+    reply, cited = validate_citations(strip_latex_delimiters(raw), known)
 
     repo.save_chat_message(conn, session_id=session_id, role="user", content=question)
     repo.save_chat_message(
