@@ -39,9 +39,38 @@ const handle = (() => {
 })();
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/* Cursor spotlight. The gradient itself lives in CSS on `.card-lit::before`
+ * and reads --mx/--my; all this does is keep those two custom properties in
+ * step with the pointer. Bound per card on pointerenter rather than globally on
+ * the document, so a page of cards costs one listener on the one being hovered.
+ * A device with no pointer never fires this and the vars stay unset, which is
+ * exactly the state where the layer renders nothing. */
+const lightCards = (root) => {
+  root.querySelectorAll(".card-lit").forEach((card) => {
+    card.addEventListener("pointermove", (e) => {
+      const box = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${e.clientX - box.left}px`);
+      card.style.setProperty("--my", `${e.clientY - box.top}px`);
+    });
+  });
+};
+
+/* The entrance animation ends on `filter: blur(0)`, and with a forwards fill
+ * that declaration persists. A lingering filter -- even a zero-radius one --
+ * keeps the element on its own compositing layer and drops text from subpixel
+ * to greyscale antialiasing, which is a visible quality loss on a dark
+ * background. Dropping the class once the animation finishes removes it. */
+const cleanUpEntrance = (root) => {
+  root.querySelectorAll(".enter").forEach((node) =>
+    node.addEventListener("animationend", () => node.classList.remove("enter"), { once: true }));
+};
+
 const mount = (id) => {
   const view = $("#view");
   view.replaceChildren($(id).content.cloneNode(true));
+  lightCards(view);
+  cleanUpEntrance(view);
   return view;
 };
 
@@ -217,6 +246,16 @@ function renderSession(sessionId) {
   let video = null;
   let activeBeat = null;
 
+  /* The trailing fade claims "there is more past the edge", so it is only
+   * applied when that is true. Re-measured on resize because the same beat
+   * count overflows at one width and fits at another. */
+  const markScrollable = () => {
+    const rail = $("#rail");
+    if (!rail) return;
+    rail.parentElement.classList.toggle("is-scrollable", rail.scrollWidth > rail.clientWidth + 1);
+  };
+  window.addEventListener("resize", markScrollable);
+
   const drawRail = () => {
     const rail = $("#rail");
     rail.replaceChildren(...beats.map((b) => {
@@ -232,6 +271,7 @@ function renderSession(sessionId) {
       return btn;
     }));
     markActive(activeBeat);
+    markScrollable();
   };
 
   const markActive = (beatId) => {
@@ -315,7 +355,9 @@ function renderSession(sessionId) {
     const btn = el("button", "cite");
     btn.type = "button";
     btn.append(el("span", "play", "▶"));
-    btn.append(document.createTextNode(b ? (timed ? `${fmt(b.start_s)} — ${b.title}` : b.title) : beatId));
+    // A middot, not an em dash: the tutor's replies are sanitised of dashes
+    // server-side, and the chips sit inside that prose.
+    btn.append(document.createTextNode(b ? (timed ? `${fmt(b.start_s)} · ${b.title}` : b.title) : beatId));
     btn.setAttribute("aria-label", b && timed ? `Jump to ${fmt(b.start_s)}, ${b.title}` : `Moment: ${b ? b.title : beatId}`);
     btn.disabled = !timed || !video;
     btn.onclick = () => seek(beatId);
@@ -386,7 +428,7 @@ function renderSession(sessionId) {
       });
       addMessage("assistant", res.reply);
     } catch (e2) {
-      addMessage("assistant", `Unable to answer right now — ${e2.message}. Try again in a moment.`);
+      addMessage("assistant", `Unable to answer right now: ${e2.message}. Try again in a moment.`);
     }
   };
 

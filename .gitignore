@@ -25,6 +25,15 @@ media_manim/
 # subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
 
-# vendored design skills -- restore with `npx skills experimental_install`,
-# pinned by hash in skills-lock.json. Third-party content, not ours to carry.
+# Vendored design skills, restored with
+#   npx skills add "https://github.com/jakubkrehel/skills"
+# and pinned by hash in skills-lock.json. Third-party content, not ours to
+# carry. The installer fans the same content out into one real copy plus a
+# directory of symlinks per supported agent, so all four paths are its output.
+# data/skills/ is listed on its own because data/ also holds the SQLite
+# database, which is ignored by the *.db rules further up rather than by a
+# directory rule.
+.agents/
 .claude/skills/
+agent/skills/
+data/skills/

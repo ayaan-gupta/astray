@@ -1,74 +1,121 @@
-/* Astray — one dark appearance, built around the rendered animation.
+/* Astray design system.
  *
- * Dark only, and deliberately: every screen in this product frames a Manim
- * render on a black background. A light shell around a black video reads as a
- * hole punched in the page, so the shell sits a few steps above black and the
- * player is the darkest surface on the screen.
+ * Token names follow shadcn/ui conventions (--background, --card, --primary,
+ * --muted-foreground, --border, --ring, --radius) so the vocabulary is one a
+ * reader already knows, and every component below is composed from that set
+ * rather than from ad-hoc values. The visual language is the one Aceternity
+ * popularised: an aurora wash behind glass panels, a cursor-tracked spotlight,
+ * a conic border beam on the single most important surface, a shimmer that
+ * crosses the primary action. It is hand-written CSS because this project has
+ * no build step, and adding React, Tailwind and Framer Motion to a working
+ * vanilla frontend would mean rebuilding the verified grounding client to
+ * arrive at the same pixels.
  *
- * Colour is OKLCH throughout. Two hues carry meaning and nothing else does:
- * coral is "the thing Astray found" plus the single primary action, and green
- * is "a machine checked this". Every other surface and control is neutral, so
- * a coloured pixel always means something.
+ * Colour is measured, not eyeballed. Every text-on-background pair here was run
+ * through APCA (0.98G-4g) and holds Lc >= 75 for body copy and Lc >= 60 for
+ * large or secondary text, including the worst case of a translucent card
+ * composited over the brightest point of the aurora. Two hues carry meaning and
+ * nothing else does: coral is the student's error, green is a machine-verified
+ * fact. The violet and teal in the aurora are decorative and never appear on a
+ * control, a state, or a value.
+ *
+ * Motion follows one rule. Expressive where it is rare (a view entrance, the
+ * diagnosis landing), nearly invisible where it repeats (hover, focus, typing).
+ * Every animated state change also has a static cue, so the whole system can be
+ * switched off by prefers-reduced-motion without losing information.
  */
 
+/* ------------------------------------------------------------------- tokens */
 :root {
   color-scheme: dark;
 
-  /* Surfaces — a 4-step ramp. The player is darker than all of them.
-   * --line-control is deliberately much lighter than the other hairlines: it
-   * is the only thing that says "you can type here", so it carries a real 3:1
-   * against both the field fill and the panel behind it. The softer lines are
-   * structure, on surfaces you can already tell apart by fill. */
-  --bg:           oklch(0.168 0.005 264);
-  --surface:      oklch(0.213 0.006 264);
-  --surface-2:    oklch(0.256 0.007 264);
-  --surface-3:    oklch(0.298 0.008 264);
-  --line:         oklch(0.360 0.009 264);
-  --line-soft:    oklch(0.275 0.007 264);
-  --line-control: oklch(0.520 0.010 264);
+  /* Surfaces. Cards are translucent so the aurora reads through them, at an
+   * alpha high enough that the composite never moves measured text contrast by
+   * more than ~2 Lc away from the opaque value. */
+  --background:   oklch(0.148 0.008 274);
+  --background-2: oklch(0.183 0.009 274);
+  --card:         oklch(0.216 0.009 274 / 0.86);
+  --card-solid:   oklch(0.216 0.009 274);
+  --muted:        oklch(0.262 0.009 274);
+  --muted-hover:  oklch(0.300 0.010 274);
+  --popover:      oklch(0.232 0.010 274);
 
-  /* Ink — 3 steps. Body text is --ink or --ink-2; --ink-3 never carries body
-   * copy. Every step is measured: --ink-2 clears APCA 75 on all three
-   * surfaces, --ink-3 clears 60. */
-  --ink:        oklch(0.967 0.003 264);
-  --ink-2:      oklch(0.856 0.008 264);
-  --ink-3:      oklch(0.775 0.011 264);
+  /* Text. Measured on --card: 0.967 -> Lc 92, 0.856 -> Lc 76, 0.775 -> Lc 64.
+   * --muted-foreground never carries body copy. */
+  --foreground:       oklch(0.967 0.003 274);
+  --foreground-2:     oklch(0.856 0.008 274);
+  --muted-foreground: oklch(0.775 0.011 274);
 
-  /* Accent: the misconception, and the one primary action per view.
-   * L sits at 0.780 rather than a deeper coral because a saturated warm hue
-   * has very little contrast headroom: this is the lightness where a near
-   * black label on the filled button finally clears APCA 60 (it reaches 62.7,
-   * and no lightness of this hue reaches 75). Chroma is capped at the sRGB
-   * gamut boundary for that lightness. */
-  --accent:      oklch(0.780 0.129 29.2);
-  --accent-hi:   oklch(0.830 0.095 29.2);
-  --accent-ink:  oklch(0.140 0.045 29.2);
-  --accent-dim:  oklch(0.780 0.129 29.2 / 0.13);
-  --accent-line: oklch(0.780 0.129 29.2 / 0.45);
+  /* Lines. Pure white alpha, never a tinted neutral: a tinted hairline picks up
+   * the surface beneath it and reads as grime along the edge.
+   *
+   * --input is dramatically lighter than --border, and measurement is why. The
+   * card is already close to black, so darkening it to make a field well barely
+   * moves luminance at all: the 24%-black fill measures 1.05:1 against the card,
+   * which is invisible. The border is therefore the only thing saying "you can
+   * type here", not a reinforcement of the fill, so it has to carry the whole
+   * cue on its own. 0.60 clears both WCAG 1.4.11's 3:1 (it reaches 7.0:1) and
+   * APCA Lc 45 against the card, the field fill, and the bare background, so an
+   * input placed outside a card later is still compliant. */
+  --border:        oklch(1 0 0 / 0.08);
+  --border-strong: oklch(1 0 0 / 0.15);
+  --input:         oklch(1 0 0 / 0.60);
+  --input-hover:   oklch(1 0 0 / 0.72);
+  --ring:          oklch(0.862 0.058 250);
 
-  /* Verified: only ever means "SymPy ran and agreed". */
-  --good:      oklch(0.812 0.152 152);
-  --good-dim:  oklch(0.812 0.152 152 / 0.12);
-  --good-line: oklch(0.812 0.152 152 / 0.34);
+  /* Brand coral, taken from the mark. L sits at 0.780 because a saturated warm
+   * hue has very little contrast headroom: this is where a near-black label on
+   * the filled button finally clears APCA 60 (it reaches 62.7, and no lightness
+   * of this hue reaches 75). Chroma is capped at the sRGB gamut boundary for
+   * that lightness. --primary is therefore never a body-text colour. */
+  --primary:            oklch(0.780 0.129 29.2);
+  --primary-hover:      oklch(0.830 0.095 29.2);
+  --primary-foreground: oklch(0.140 0.045 29.2);
+  --primary-soft:       oklch(0.780 0.129 29.2 / 0.13);
+  --primary-soft-2:     oklch(0.780 0.129 29.2 / 0.20);
+  --primary-line:       oklch(0.780 0.129 29.2 / 0.42);
+  --primary-glow:       oklch(0.780 0.129 29.2 / 0.28);
 
-  --focus: oklch(0.862 0.058 250);
+  /* Only ever means "SymPy ran and agreed". */
+  --success:      oklch(0.812 0.152 152);
+  --success-soft: oklch(0.812 0.152 152 / 0.12);
+  --success-line: oklch(0.812 0.152 152 / 0.32);
 
-  --r-panel: 16px;
-  --r-control: 10px;
-  --r-inset: 8px;
-  --r-pill: 999px;
+  /* Decorative only. */
+  --aurora-a: oklch(0.68 0.20 28);
+  --aurora-b: oklch(0.60 0.20 288);
+  --aurora-c: oklch(0.66 0.14 208);
 
-  --shadow-panel: 0 1px 2px oklch(0 0 0 / 0.28), 0 10px 28px -16px oklch(0 0 0 / 0.55);
-  --shadow-raised: 0 1px 2px oklch(0 0 0 / 0.34), 0 16px 40px -20px oklch(0 0 0 / 0.7);
+  /* Radii. Nested surfaces are concentric: outer = inner + padding. */
+  --radius-xs:   6px;
+  --radius-sm:   9px;
+  --radius:      13px;
+  --radius-lg:   20px;
+  --radius-xl:   26px;
+  --radius-full: 999px;
+
+  /* Elevation is a ring plus depth rather than a border, so one token works
+   * over the card, the aurora and the video without being redesigned per
+   * background. Structural lines stay real borders. */
+  --ring-1:      0 0 0 1px oklch(1 0 0 / 0.08);
+  --shadow-sm:   var(--ring-1), 0 1px 2px oklch(0 0 0 / 0.30);
+  --shadow-card: var(--ring-1), 0 1px 2px oklch(0 0 0 / 0.24),
+                 0 16px 40px -24px oklch(0 0 0 / 0.60);
+  --shadow-pop:  var(--ring-1), 0 12px 36px -12px oklch(0 0 0 / 0.70);
+  --shadow-glow: 0 0 0 1px var(--primary-line), 0 8px 30px -10px var(--primary-glow);
 
   --sans: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Type scale — deviate from these as little as possible.
- * display 34 / title 20 / heading 15 / body 15 / sm 13.5 / label 11.5 */
+@property --beam {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
 
 * { box-sizing: border-box; }
 
@@ -76,465 +123,1040 @@ html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--ink);
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
   font-family: var(--sans);
   font-size: 15px;
   line-height: 1.55;
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+button { font: inherit; cursor: pointer; }
+
+::selection { background: var(--primary-soft-2); color: var(--foreground); }
+
 :focus-visible {
-  outline: 2px solid var(--focus);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
-::selection { background: var(--accent-dim); color: var(--ink); }
-
-.sr-only {
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+/* ----------------------------------------------------------------- backdrop */
+/* Two fixed decorative layers beneath everything. The aurora is three blurred
+ * radial washes drifting on a long loop; the grid is a 1px lattice masked to
+ * dissolve before it reaches any edge, so it never ends in a visible seam.
+ * Neither is interactive and both are hidden from assistive tech. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.skip {
-  position: absolute; inset-inline-start: 12px; top: -60px; z-index: 20;
-  background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
-  padding: 10px 16px; border-radius: var(--r-control); text-decoration: none;
-  transition: top 160ms var(--ease);
+.backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, oklch(1 0 0 / 0.032) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(1 0 0 / 0.032) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(ellipse 80% 58% at 50% 0%, #000 18%, transparent 76%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 58% at 50% 0%, #000 18%, transparent 76%);
 }
-.skip:focus-visible { top: 12px; }
 
-.hidden { display: none !important; }
+/* The washes are already soft (each gradient is fully transparent by 66%), so
+ * the blur only has to smooth the banding. A large radius here is the most
+ * expensive thing on the page and this is a screen that plays video, so it is
+ * kept to the smallest value that still looks continuous. */
+.aurora {
+  position: absolute;
+  inset: -28% -20% auto -20%;
+  height: 128%;
+  filter: blur(46px);
+  opacity: 0.4;
+}
 
-/* ------------------------------------------------------------------ chrome */
+/* Transform only, so the drift stays on the compositor and never triggers
+ * layout or paint. */
+.aurora span {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  animation: drift 30s var(--ease) infinite alternate;
+}
 
+.aurora span:nth-child(1) {
+  inset: 2% auto auto 5%;
+  width: 46vw;
+  height: 42vw;
+  background: radial-gradient(circle, var(--aurora-a), transparent 66%);
+}
+
+.aurora span:nth-child(2) {
+  inset: -8% 2% auto auto;
+  width: 40vw;
+  height: 40vw;
+  background: radial-gradient(circle, var(--aurora-b), transparent 66%);
+  animation-duration: 38s;
+  animation-delay: -12s;
+}
+
+/* Kept below the headline band on purpose. Sitting this one directly behind the
+ * display type lifted the background right where the second line falls, which
+ * cost the headline visible contrast even though the text colour never changed.
+ * It now washes the cards instead, where the surfaces are opaque enough to stop
+ * it reaching the text. */
+.aurora span:nth-child(3) {
+  inset: 56% auto auto 30%;
+  width: 34vw;
+  height: 26vw;
+  background: radial-gradient(circle, var(--aurora-c), transparent 68%);
+  animation-duration: 34s;
+  animation-delay: -22s;
+}
+
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(6%, 4%, 0) scale(1.16); }
+}
+
+/* ------------------------------------------------------------------- topbar */
 .topbar {
-  position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 24px;
-  padding: 0 clamp(20px, 4vw, 32px);
-  height: 60px;
-  background: oklch(0.168 0.005 264 / 0.82);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--line-soft);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 13px clamp(18px, 4vw, 44px);
+  background: oklch(0.148 0.008 274 / 0.72);
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  border-bottom: 1px solid var(--border);
 }
 
-.brand { display: flex; align-items: center; border-radius: 6px; }
+.brand { display: flex; align-items: center; border-radius: var(--radius-sm); outline-offset: 4px; }
 .brand img { display: block; height: 26px; width: auto; }
 
-.nav { display: flex; gap: 4px; }
-.nav a {
-  color: var(--ink-3); text-decoration: none; font-size: 13.5px;
-  padding: 7px 12px; border-radius: var(--r-pill);
-  transition-property: color, background-color;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+.nav {
+  display: flex;
+  gap: 3px;
+  margin-inline-start: auto;
+  padding: 3px;
+  background: oklch(1 0 0 / 0.04);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
-.nav a:hover { color: var(--ink-2); background: var(--surface); }
-.nav a.is-active { color: var(--ink); background: var(--surface-2); }
 
-main { display: block; padding: clamp(28px, 5vw, 48px) clamp(20px, 4vw, 32px) 80px; }
+/* Concentric: a 13px shell with 3px padding gives a 10px inner radius. */
+.nav a {
+  padding: 6px 14px;
+  border-radius: 10px;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-decoration: none;
+  transition-property: color, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.nav a:hover { color: var(--foreground); background: oklch(1 0 0 / 0.05); }
+.nav a.is-active { color: var(--foreground); background: var(--muted); box-shadow: var(--shadow-sm); }
+
+/* ------------------------------------------------------------------- layout */
+main { display: block; }
 main:focus { outline: none; }
 
-.pane { max-width: 1200px; margin: 0 auto; }
-.pane-narrow { max-width: 720px; }
+.pane {
+  width: 100%;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 56px) clamp(18px, 4vw, 44px) 96px;
+}
 
-/* ---------------------------------------------------------------- headings */
+.pane-narrow { max-width: 760px; }
 
-.hero { margin-bottom: 28px; }
+/* Section rhythm. The gap between groups is more than double the gap inside
+ * one, so grouping is carried by space rather than by rules. */
+.pane > * + * { margin-top: 26px; }
+.pane > .hero + * { margin-top: 40px; }
+
+/* --------------------------------------------------------------------- hero */
+.hero { padding-block: clamp(6px, 3vw, 24px) 4px; }
 
 .eyebrow {
-  display: flex; align-items: center; gap: 7px;
-  margin: 0 0 10px;
-  font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 14px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
 }
-.eyebrow-mark { display: block; opacity: 0.75; }
+
+.eyebrow-mark { display: block; }
 
 .display {
-  margin: 0 0 12px;
-  font-size: clamp(28px, 4.4vw, 34px); line-height: 1.1;
-  letter-spacing: -0.025em; font-weight: 640;
+  margin: 0;
+  max-width: 23ch;
+  font-size: clamp(34px, 5.4vw, 52px);
+  font-weight: 640;
+  line-height: 1.06;
+  letter-spacing: -0.032em;
   text-wrap: balance;
+  /* Near-white at the top falling slightly at the bottom reads as light across
+   * the type. The falloff is deliberately shallow: at a deeper bottom stop a
+   * two-line headline reads as though its second line were de-emphasised
+   * rather than lit, and the stop stays well above the body-text floor. */
+  background: linear-gradient(180deg, var(--foreground) 46%, oklch(0.905 0.006 274));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Without clip-to-text support, `color: transparent` would erase the headline
+ * rather than degrade it. */
+@supports not ((background-clip: text) or (-webkit-background-clip: text)) {
+  .display { background: none; color: var(--foreground); }
 }
 
 .lede {
-  margin: 0; max-width: 62ch;
-  color: var(--ink-2); text-wrap: pretty;
+  margin: 18px 0 0;
+  max-width: 58ch;
+  color: var(--foreground-2);
+  font-size: 16.5px;
+  line-height: 1.62;
+  text-wrap: pretty;
 }
 
-.panel-title {
-  margin: 0 0 14px;
-  font-size: 15px; font-weight: 600; letter-spacing: -0.006em; color: var(--ink);
+/* -------------------------------------------------------------------- cards */
+.card {
+  position: relative;
+  padding: clamp(20px, 2.6vw, 28px);
+  background: var(--card);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
 }
 
-.field-hint { margin: 0; color: var(--ink-3); font-size: 13.5px; text-wrap: pretty; }
-.ink-2 { color: var(--ink-2); margin: 0; }
-
-/* The message is --ink-2 and the accent is only the rule down its edge, so the
- * error does not depend on colour to be read or to be recognised as an error. */
-.err {
-  margin: 18px 0 0; padding: 10px 14px;
-  background: var(--accent-dim);
-  border-inline-start: 2px solid var(--accent);
-  border-radius: 0 var(--r-inset) var(--r-inset) 0;
-  font-size: 13.5px; color: var(--ink-2);
+.card-title {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
 }
-.err:empty { display: none; }
 
-/* ----------------------------------------------------------------- panels */
+.card-head { margin-bottom: 18px; }
+.card-head .card-title + .field-hint { margin-top: 5px; }
 
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-panel);
-  padding: 22px;
-  box-shadow: var(--shadow-panel);
+/* Cursor spotlight. --mx/--my are written by app.js on pointermove; the layer
+ * is a soft radial that follows the pointer and fades in on hover. Opacity is
+ * the only animated property, at 200ms, so a high-frequency hover costs almost
+ * nothing. Without a pointer the vars never set and nothing appears. */
+.card-lit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    460px circle at var(--mx, 50%) var(--my, 0%),
+    var(--primary-soft-2),
+    transparent 68%
+  );
+  /* A positioned pseudo-element paints above the card's non-positioned content,
+   * so without a blend mode this washes coral over the text. `screen` can only
+   * lighten: near-white text is already at the ceiling and comes through
+   * untouched, while the dark card surface picks up the glow. The card's own
+   * backdrop-filter isolates the blend, so it never reaches the aurora. */
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+  pointer-events: none;
 }
-.panel + .panel { margin-top: 16px; }
 
-/* ---------------------------------------------------------------- controls */
+.card-lit:hover::before { opacity: 1; }
 
-button { font: inherit; cursor: pointer; }
+/* Border beam: a conic sweep clipped to a 1px ring by masking the content box
+ * out of the padding box. Applied to exactly one surface in the product, the
+ * diagnosis, which is the entire reason the page exists. */
+.card-beam::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--beam),
+    transparent 0deg 62deg,
+    var(--primary-line) 84deg,
+    var(--primary) 92deg,
+    var(--primary-line) 100deg,
+    transparent 122deg 360deg
+  );
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  animation: beam 5.5s linear infinite;
+  pointer-events: none;
+}
 
+@keyframes beam { to { --beam: 360deg; } }
+
+/* ----------------------------------------------------------------- controls */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  border: 1px solid transparent; border-radius: var(--r-control);
-  padding: 10px 18px; min-height: 40px;
-  font-size: 14px; font-weight: 600; letter-spacing: -0.006em;
-  transition-property: background-color, border-color, color, transform, box-shadow;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+  --btn-bg: var(--muted);
+  --btn-fg: var(--foreground);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  min-height: 42px;
+  overflow: hidden;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border: 0;
+  border-radius: var(--radius);
+  font-size: 14.5px;
+  font-weight: 570;
+  letter-spacing: -0.008em;
+  box-shadow: var(--shadow-sm);
+  transition-property: background-color, box-shadow, scale, color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
 }
 
-.btn-primary { background: var(--accent); color: var(--accent-ink); }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hi); }
-.btn-primary:active:not(:disabled) { transform: scale(0.96); }
-.btn:disabled { opacity: 0.42; cursor: not-allowed; }
+.btn:hover:not(:disabled) { --btn-bg: var(--muted-hover); }
+.btn:active:not(:disabled) { scale: 0.96; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: var(--ring-1); }
 
+.btn-primary {
+  --btn-bg: var(--primary);
+  --btn-fg: var(--primary-foreground);
+  font-weight: 600;
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-primary:hover:not(:disabled) {
+  --btn-bg: var(--primary-hover);
+  box-shadow: 0 0 0 1px var(--primary), 0 10px 34px -8px var(--primary-glow);
+}
+
+/* Shimmer: a highlight band crossing the fill once per hover. Transform only,
+ * and it never loops, so it reads as a response to the pointer rather than an
+ * animation competing for attention. */
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 42%, oklch(1 0 0 / 0.34) 50%, transparent 58%);
+  transform: translateX(-110%);
+  pointer-events: none;
+}
+
+.btn-primary:hover:not(:disabled)::after {
+  transform: translateX(110%);
+  transition: transform 680ms ease-out;
+}
+
+.btn-quiet {
+  --btn-bg: transparent;
+  --btn-fg: var(--foreground-2);
+  box-shadow: inset 0 0 0 1px var(--input);
+  text-decoration: none;
+}
+
+.btn-quiet:hover:not(:disabled) { --btn-bg: oklch(1 0 0 / 0.05); --btn-fg: var(--foreground); }
+
+.btn-send { flex: 0 0 auto; width: 42px; padding: 0; }
+
+/* A play or arrow glyph sits right of its own optical centre, so a trailing
+ * icon needs slightly less padding on its side than the text side. */
+.btn-icon-end { padding-inline: 18px 15px; }
+
+/* Tabs, APG pattern. The selected tab is a filled surface rather than an
+ * underline, so selection survives without colour. */
 .tabs {
-  display: flex; gap: 6px;
-  margin-bottom: 22px;
-  padding: 4px; border-radius: var(--r-pill);
-  background: var(--bg); border: 1px solid var(--line-soft);
-  width: fit-content;
+  display: inline-flex;
+  gap: 3px;
+  margin-bottom: 24px;
+  padding: 3px;
+  background: oklch(1 0 0 / 0.04);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
+
 .tab {
-  border: 0; background: transparent; color: var(--ink-3);
-  padding: 7px 16px; border-radius: var(--r-pill);
-  font-size: 13.5px; font-weight: 550; min-height: 32px;
-  transition-property: background-color, color;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+  padding: 7px 15px;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  font-weight: 550;
+  min-height: 34px;
+  transition-property: color, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
 }
-.tab:hover { color: var(--ink-2); }
-.tab.is-active { background: var(--surface-2); color: var(--ink); }
 
-/* ------------------------------------------------------------------ fields */
+.tab:hover { color: var(--foreground); }
+.tab.is-active { background: var(--muted); color: var(--foreground); box-shadow: var(--shadow-sm); }
 
-.field { margin-bottom: 20px; }
-/* Class rather than `.field > label`: the drop zone is also a <label> for the
- * same input, and an element selector was winning on specificity and forcing it
- * back to display:block, which collapsed its stacked lines onto one. */
+/* ------------------------------------------------------------------- fields */
+.field + .field { margin-top: 20px; }
+
+/* A class, not `.field > label`: the drop zone is itself a <label> for the same
+ * input, and an element selector wins on specificity and would force it back to
+ * display:block, collapsing its stacked lines onto one. */
 .field-label {
-  display: block; margin-bottom: 6px;
-  font-size: 13px; font-weight: 550; color: var(--ink-2);
+  display: block;
+  margin-bottom: 7px;
+  color: var(--foreground-2);
+  font-size: 13px;
+  font-weight: 560;
 }
-.field-hint + textarea, .field-hint + input { margin-top: 8px; }
+
+.field-hint {
+  margin: 0 0 9px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
 
 input, textarea {
   width: 100%;
-  padding: 11px 13px;
-  background: var(--bg);
-  color: var(--ink);
-  border: 1px solid var(--line-control);
-  border-radius: var(--r-control);
+  padding: 11px 14px;
+  background: oklch(0 0 0 / 0.24);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
   font-family: var(--sans);
-  font-size: 16px; /* iOS zooms anything smaller */
+  /* 16px stops iOS Safari zooming the viewport on focus. */
+  font-size: 16px;
   line-height: 1.5;
-  transition-property: border-color, background-color;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+  transition-property: border-color, box-shadow, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
 }
+
 @media (min-width: 640px) { input, textarea { font-size: 14.5px; } }
-input.mono, textarea.mono, .review-lines input { font-family: var(--mono); }
-textarea { resize: vertical; min-height: 120px; }
-/* Placeholders here are worked examples of the notation, not labels — every
- * field has a visible <label> — so they are held to the same 60 the rest of
- * the non-body text meets rather than faded into decoration. */
-input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
-input:hover, textarea:hover { border-color: var(--ink-3); }
 
-/* ------------------------------------------------------------- photo input */
+input.mono, textarea.mono, .review-lines input {
+  font-family: var(--mono);
+  letter-spacing: -0.01em;
+}
 
+textarea { resize: vertical; min-height: 118px; line-height: 1.65; }
+
+/* Placeholders here are worked examples of the notation rather than labels
+ * (every field has a visible <label>), so they are held to the same Lc 60 the
+ * rest of the non-body text meets instead of faded into decoration. */
+input::placeholder, textarea::placeholder { color: var(--muted-foreground); opacity: 1; }
+
+/* Brighter than --input, not dimmer. --border-strong is a decorative hairline
+ * and sits far below --input, so reusing it here would dim the border on hover. */
+input:hover, textarea:hover { border-color: var(--input-hover); }
+
+input:focus, textarea:focus {
+  outline: none;
+  background: oklch(0 0 0 / 0.32);
+  border-color: var(--primary-line);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+form > .btn { margin-top: 24px; }
+
+/* ---------------------------------------------------------------- drop zone */
 .drop {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 6px; text-align: center;
-  min-height: 160px; padding: 24px;
-  background: var(--bg);
-  border: 1px dashed var(--line-control);
-  border-radius: var(--r-control);
-  color: var(--ink-2); cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 168px;
+  padding: 30px 24px;
+  background: oklch(0 0 0 / 0.18);
+  border: 1px dashed var(--input);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  cursor: pointer;
   transition-property: border-color, background-color, color;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
 }
-.drop:hover { border-color: var(--ink-3); }
-.drop.is-over { border-color: var(--accent); border-style: solid; background: var(--accent-dim); color: var(--ink); }
-.drop-icon { color: var(--ink-3); display: block; }
-.drop-text { font-size: 14px; }
-.drop-sub { font-size: 12.5px; color: var(--ink-3); }
-#photo-file:focus-visible + .drop { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-.review { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line-soft); }
-.review-lines { display: flex; flex-direction: column; gap: 8px; margin: 16px 0 20px; }
-.review-lines .review-problem { border-color: var(--surface-3); }
-
-/* --------------------------------------------------------------- diagnosis */
-
-.diagnosis { margin-bottom: 20px; }
-.diagnosis.is-pending { display: flex; align-items: center; gap: 12px; }
-
-.diagnosis-head {
-  display: flex; align-items: baseline; justify-content: space-between;
-  gap: 16px; flex-wrap: wrap;
+.drop:hover, .drop.is-over {
+  background: var(--primary-soft);
+  border-color: var(--primary-line);
+  border-style: solid;
 }
+
+.drop-icon { display: block; color: var(--muted-foreground); transition: color 150ms ease-out; }
+.drop:hover .drop-icon, .drop.is-over .drop-icon { color: var(--primary); }
+.drop-text { color: var(--foreground-2); font-size: 14px; font-weight: 540; }
+.drop-sub { color: var(--muted-foreground); font-size: 12.5px; }
+
+/* The real input is visually hidden, so its focus ring has to land on the
+ * label that stands in for it. */
+#photo-file:focus-visible + .drop { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.review { margin-top: 26px; padding-top: 26px; border-top: 1px solid var(--border); }
+.review-lines { display: grid; gap: 8px; margin: 14px 0 20px; }
+.review-lines input { font-size: 14px; }
+.review-problem { font-weight: 600; }
+/* The steps are subordinate to the problem, so they sit one step in. */
+.review-step { width: calc(100% - 18px); margin-inline-start: 18px; }
+
+.err {
+  margin: 18px 0 0;
+  padding: 11px 15px;
+  background: var(--primary-soft);
+  border-inline-start: 2px solid var(--primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  /* Full ink, not --foreground-2: on the coral tint that step measures Lc 73.7,
+   * just under the body floor, and an error message is the last text in the app
+   * that should be hard to read. */
+  color: var(--foreground);
+  font-size: 13.5px;
+}
+
+.err:empty { display: none; }
+
+/* ---------------------------------------------------------------- diagnosis */
+.diagnosis { overflow: hidden; }
+
+.diagnosis.is-pending {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted-foreground);
+}
+
+.diagnosis.is-pending p { margin: 0; font-size: 14.5px; }
+
 .diagnosis h1 {
-  margin: 0 0 16px;
-  font-size: 20px; line-height: 1.25; letter-spacing: -0.015em; font-weight: 620;
+  margin: 0;
+  max-width: 26ch;
+  font-size: clamp(25px, 3.2vw, 33px);
+  font-weight: 640;
+  line-height: 1.12;
+  letter-spacing: -0.026em;
+  text-wrap: balance;
 }
-.diagnosis p { margin: 0; max-width: 62ch; color: var(--ink-2); text-wrap: pretty; }
 
+/* :not(.eyebrow) because the eyebrow is also a direct <p> child and an
+ * element-bearing selector would out-specify .eyebrow's own margins. */
+.diagnosis > p:not(.eyebrow) {
+  margin: 16px 0 0;
+  max-width: 62ch;
+  color: var(--foreground-2);
+  font-size: 15.5px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+/* The false rule itself, given a plaque of its own because it is the single
+ * finding the whole run produces. The accent is the leading rule rather than
+ * the text colour: coral has no lightness that clears the body-text floor
+ * against its own tint. */
 .rule {
-  display: block; width: fit-content; max-width: 100%;
-  margin: 0 0 16px; padding: 12px 16px;
-  background: var(--accent-dim);
-  border-inline-start: 2px solid var(--accent);
-  border-radius: 0 var(--r-inset) var(--r-inset) 0;
-  font-family: var(--mono); font-size: 16px; color: var(--ink);
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 20px 0 0;
+  padding: 15px 18px;
   overflow-x: auto;
+  background: var(--primary-soft);
+  border-inline-start: 2px solid var(--primary);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: clamp(15px, 2vw, 17.5px);
+  letter-spacing: -0.012em;
 }
 
-.badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+
 .badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 11px; border-radius: var(--r-pill);
-  border: 1px solid var(--line); color: var(--ink-3);
-  font-size: 12.5px; white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  background: oklch(1 0 0 / 0.05);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-weight: 520;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.badge.is-good { color: var(--good); border-color: var(--good-line); background: var(--good-dim); }
-.badge.is-peers { color: var(--ink); border-color: var(--surface-3); background: var(--surface-2); }
 
-/* ----------------------------------------------------------------- theatre */
+/* Green means a machine checked it. The tick in the label is a second cue, so
+ * the claim does not rest on colour alone. */
+.badge.is-good {
+  background: var(--success-soft);
+  box-shadow: inset 0 0 0 1px var(--success-line);
+  color: var(--foreground-2);
+}
 
+.badge.is-peers {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+  color: var(--foreground-2);
+}
+
+.spinner {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .spinner { animation: spin 720ms linear infinite; }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------------ theatre */
+/* Holds the expanded two-column layout until the chat column can no longer
+ * carry a readable measure, then stacks. The breakpoint comes from that, not
+ * from a device width: the player needs ~560px to be watchable and the chat
+ * ~348px, which stop coexisting just above 1040px. */
 .theatre {
   display: grid;
-  grid-template-columns: minmax(0, 1.72fr) minmax(340px, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.68fr) minmax(348px, 1fr);
+  gap: 22px;
   align-items: start;
 }
-/* Collapses where the content stops fitting: the player needs ~560px to be
- * watchable and the chat ~340px, which no longer coexist below ~1000px. */
-@media (max-width: 1000px) { .theatre { grid-template-columns: 1fr; } }
 
-.stage { min-width: 0; }
+@media (max-width: 1040px) { .theatre { grid-template-columns: minmax(0, 1fr); } }
 
+.stage { display: grid; gap: 12px; min-width: 0; }
+
+/* One shell around the video and its filmstrip so they read as a single device
+ * rather than two stacked boxes. */
+.screen {
+  padding: 8px;
+  background: var(--card);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+
+/* Concentric: a 26px shell with 8px padding gives an 18px inner radius. */
 .player {
   position: relative;
   aspect-ratio: 16 / 9;
-  background: #000;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-panel);
   overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: var(--shadow-raised);
+  background: #000;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px var(--border);
 }
-.player video { width: 100%; height: 100%; display: block; }
-.player.is-empty { background: var(--surface); align-items: stretch; }
 
-.pipeline { width: 100%; padding: 24px clamp(20px, 3vw, 30px); overflow-y: auto; }
-.stages { list-style: none; margin: 0; padding: 0; }
+.player video { display: block; width: 100%; height: 100%; }
+
+.player.is-empty {
+  display: grid;
+  place-items: center;
+  padding: 26px;
+  background: oklch(0 0 0 / 0.34);
+}
+
+/* The wait is three to four minutes, so the pipeline shows the run's actual
+ * reasoning instead of a spinner: each stage reports what it decided. */
+.pipeline { width: min(100%, 430px); max-height: 100%; overflow-y: auto; }
+
+.pipeline .eyebrow { margin-bottom: 12px; }
+
+.stages { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+
 .stages li {
-  display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start;
-  padding: 5px 0; font-size: 13.5px; color: var(--ink-3);
-  transition: color 200ms var(--ease);
-}
-.stages .mark { display: block; text-align: center; line-height: 1.6; }
-.stages li.is-done { color: var(--ink-2); }
-.stages li.is-done .mark { color: var(--good); }
-.stages li.is-active { color: var(--ink); }
-.stages li.is-active .mark { color: var(--accent); }
-.stages .why {
-  display: block; margin-top: 3px;
-  font-size: 12.5px; color: var(--ink-3); max-width: 62ch;
+  display: grid;
+  grid-template-columns: 15px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  transition-property: color, background-color;
+  transition-duration: 200ms;
+  transition-timing-function: ease-out;
 }
 
-/* Beat rail — a filmstrip. It scrolls rather than wrapping so a run with any
- * number of beats reads as one deliberate row, and the trailing fade is the
- * cue that more of the animation exists past the edge. */
-.rail-wrap { position: relative; margin-top: 12px; }
-.rail-wrap::after {
-  content: ""; position: absolute; inset-block: 0; inset-inline-end: 0; width: 40px;
-  background: linear-gradient(to left, var(--bg), transparent);
-  pointer-events: none;
+.stages li.is-done { color: var(--foreground-2); }
+
+.stages li.is-active {
+  background: var(--primary-soft);
+  color: var(--foreground);
+  font-weight: 550;
 }
+
+.mark { text-align: center; line-height: 1.5; color: var(--muted-foreground); }
+.stages li.is-done .mark { color: var(--success); }
+.stages li.is-active .mark { color: var(--primary); }
+
+.why {
+  display: block;
+  margin-top: 3px;
+  max-width: 52ch;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+/* --------------------------------------------------------------------- rail */
+.rail-wrap { position: relative; min-width: 0; }
+
 .rail {
-  display: flex; gap: 8px;
-  overflow-x: auto; scroll-behavior: smooth;
+  display: flex;
+  gap: 8px;
+  padding: 2px 2px 6px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
   scroll-snap-type: x proximity;
-  padding-bottom: 4px;
   scrollbar-width: none;
 }
+
+/* The trailing fade is the affordance for "there are more beats past the edge";
+ * without it the filmstrip looks complete at whatever width it happens to be.
+ *
+ * It is a mask on the strip rather than a gradient to --background painted over
+ * it, because the rail sits above the aurora: a fade to a flat colour would
+ * read as a smudge wherever the wash behind it is not that exact colour. And it
+ * is applied only when the strip actually overflows -- app.js measures that --
+ * since fading the last chip when there is nothing past it is a lie. */
+.rail-wrap.is-scrollable .rail {
+  mask-image: linear-gradient(to right, #000 calc(100% - 52px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 52px), transparent);
+  padding-inline-end: 52px;
+}
+
 .rail::-webkit-scrollbar { display: none; }
 
 .beat {
-  flex: 0 0 auto; min-width: 154px; max-width: 220px;
+  flex: 0 0 auto;
+  display: grid;
+  gap: 3px;
+  min-width: 156px;
+  max-width: 212px;
+  padding: 9px 13px;
+  background: var(--card-solid);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted-foreground);
+  text-align: start;
   scroll-snap-align: start;
-  text-align: start; padding: 10px 12px;
-  background: var(--surface); color: var(--ink-2);
-  border: 1px solid var(--line-soft); border-radius: var(--r-control);
-  transition-property: background-color, border-color, color, transform;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+  transition-property: background-color, box-shadow, color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
 }
-.beat:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
-.beat:active:not(:disabled) { transform: scale(0.96); }
+
+/* The timestamp lifts a step on hover as well as the fill: --muted-foreground on
+ * --muted measures Lc 59.8, marginally under the floor for non-body text. */
+.beat:hover:not(:disabled) { background: var(--muted); }
+.beat:hover:not(:disabled) .beat-time { color: var(--foreground-2); }
+.beat:active:not(:disabled) { scale: 0.96; }
 .beat:disabled { opacity: 0.45; cursor: default; }
-.beat .beat-title {
-  display: block; font-size: 12.5px; font-weight: 550; line-height: 1.35;
-  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+
+.beat-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--foreground-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.35;
+  letter-spacing: -0.008em;
 }
-.beat .beat-time {
-  display: block; margin-top: 4px;
-  font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums;
-}
-/* The beat that targets the misconception is the point of the whole render. */
-.beat.is-target { border-color: var(--accent-line); }
+
+.beat-time { font-size: 11.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+
+/* The beat that targets the misconception is the point of the whole render.
+ * Marked with a ring rather than a fill so the active state can still fill it. */
+.beat.is-target { box-shadow: var(--ring-1), inset 0 0 0 1px var(--primary-line); }
+
 .beat.is-active {
-  background: var(--accent-dim); border-color: var(--accent); color: var(--ink);
+  background: var(--primary-soft-2);
+  box-shadow: 0 0 0 1px var(--primary-line), 0 6px 20px -8px var(--primary-glow);
 }
-/* --ink, not the accent: the accent on its own tint measures Lc 57, and the
- * fill plus border already say "active" without recolouring the timestamp. */
-.beat.is-active .beat-time { color: var(--ink); }
 
-/* -------------------------------------------------------------------- chat */
+/* Full ink, not the accent: coral on a coral tint measures Lc 57, under the
+ * floor, and the fill plus ring already say "active" without recolouring. */
+.beat.is-active .beat-title, .beat.is-active .beat-time { color: var(--foreground); }
 
+/* --------------------------------------------------------------------- chat */
 .chat {
-  display: flex; flex-direction: column;
-  padding: 20px;
-  min-height: 480px;
-  max-height: calc(100vh - 140px);
-  position: sticky; top: 76px;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  position: sticky;
+  top: 86px;
+  max-height: calc(100dvh - 130px);
+  min-height: 470px;
 }
-@media (max-width: 1000px) { .chat { position: static; max-height: none; } }
+
+@media (max-width: 1040px) { .chat { position: static; max-height: none; } }
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-mark { display: block; flex: 0 0 auto; }
 
 .messages {
-  flex: 1 1 auto; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 18px;
-  margin: 0 -4px 14px; padding: 0 4px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  display: grid;
+  gap: 20px;
+  align-content: start;
   scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
+
 .messages:empty { display: none; }
 
-.msg { font-size: 14px; }
-.msg .who {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--ink-3); margin-bottom: 5px;
+.msg { display: grid; gap: 6px; }
+.msg.user { justify-items: end; }
+
+.who {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
-.msg .body { color: var(--ink-2); line-height: 1.6; }
+
+.msg .body { max-width: 94%; color: var(--foreground-2); font-size: 14.5px; line-height: 1.62; }
+
 .msg.user .body {
-  display: inline-block;
-  background: var(--surface-2); color: var(--ink);
-  padding: 9px 13px; border-radius: var(--r-control);
+  padding: 10px 14px;
+  background: var(--muted);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-xs) var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  color: var(--foreground);
 }
-.msg .body p { margin: 0 0 8px; }
-.msg .body p:last-child { margin-bottom: 0; }
-.msg .body ul { margin: 0 0 8px; padding-inline-start: 18px; }
-.msg .body li { margin-bottom: 6px; }
-.msg .body li:last-child { margin-bottom: 0; }
-.msg .body strong { color: var(--ink); font-weight: 620; }
+
+.msg .body > *:first-child { margin-top: 0; }
+.msg .body > *:last-child { margin-bottom: 0; }
+.msg .body p { margin: 0 0 10px; }
+.msg .body ul { margin: 0 0 10px; padding-inline-start: 20px; display: grid; gap: 7px; }
+.msg .body strong { color: var(--foreground); font-weight: 620; }
+
 .msg .body code {
-  font-family: var(--mono); font-size: 12.5px;
-  background: var(--surface-2); color: var(--ink);
-  padding: 1px 5px; border-radius: 5px;
+  padding: 1.5px 5px;
+  background: oklch(0 0 0 / 0.34);
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-family: var(--mono);
+  font-size: 0.9em;
 }
 
+/* A citation is the product's whole claim, that the tutor knows what the
+ * student watched. Styled as a control because it is one: it seeks the player. */
 .cite {
-  display: inline-flex; align-items: center; gap: 5px;
-  background: var(--surface-2); border: 1px solid var(--line);
-  color: var(--ink); border-radius: var(--r-pill);
-  padding: 2px 10px 2px 8px; margin: 0 1px;
-  font-size: 12.5px; font-weight: 550; font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 1px;
+  padding: 3px 10px 3px 8px;
+  background: var(--primary-soft);
+  border: 0;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 540;
+  font-variant-numeric: tabular-nums;
   vertical-align: baseline;
-  transition-property: background-color, border-color, transform;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+  transition-property: background-color, box-shadow, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
 }
-.cite:hover { border-color: var(--accent); background: var(--accent-dim); }
-.cite:active { transform: scale(0.96); }
-.cite .play { color: var(--accent); font-size: 9px; line-height: 1; }
 
-.chat-empty { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 14px; }
-.chat-empty-title { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
-.suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.cite:hover:not(:disabled) {
+  background: var(--primary-soft-2);
+  box-shadow: inset 0 0 0 1px var(--primary), 0 4px 14px -6px var(--primary-glow);
+}
+
+.cite:active:not(:disabled) { scale: 0.96; }
+.cite:disabled { cursor: default; opacity: 0.6; }
+
+/* A triangle's optical centre sits right of its geometric one. */
+.cite .play { color: var(--primary); font-size: 9px; line-height: 1; transform: translateX(0.5px); }
+
+.chat-empty { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: flex-end; padding: 24px 20px; }
+
+.chat-empty-title { margin: 0 0 6px; color: var(--foreground); font-size: 14px; font-weight: 580; }
+
+.suggestions { display: grid; gap: 7px; margin-top: 16px; }
+
 .suggestion {
-  background: var(--bg); border: 1px solid var(--line); color: var(--ink-2);
-  border-radius: var(--r-pill); padding: 6px 12px; min-height: 32px;
-  font-size: 12.5px; text-align: start;
-  transition-property: background-color, border-color, color, transform;
-  transition-duration: 140ms; transition-timing-function: var(--ease);
+  padding: 10px 13px;
+  background: oklch(1 0 0 / 0.035);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--foreground-2);
+  font-size: 13.5px;
+  text-align: start;
+  transition-property: background-color, box-shadow, color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
 }
-.suggestion:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); border-color: var(--surface-3); }
-.suggestion:active:not(:disabled) { transform: scale(0.96); }
-.suggestion:disabled { opacity: 0.42; cursor: not-allowed; }
 
-.composer { display: flex; gap: 8px; align-items: flex-end; }
-.composer input { border-radius: var(--r-pill); padding-inline: 16px; min-height: 40px; }
-.btn-send {
-  flex: 0 0 auto; width: 40px; height: 40px; padding: 0; border-radius: var(--r-pill);
+.suggestion:hover:not(:disabled) {
+  background: oklch(1 0 0 / 0.06);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--foreground);
 }
-.composer + .field-hint { margin-top: 10px; }
 
-/* ---------------------------------------------------------------- insights */
+.suggestion:active:not(:disabled) { scale: 0.96; }
+.suggestion:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.stat-list { display: flex; flex-direction: column; gap: 4px; }
+.composer { display: flex; gap: 9px; padding: 14px 20px 0; }
+
+#chat-hint { margin: 0; padding: 12px 20px 16px; color: var(--muted-foreground); font-size: 12px; }
+
+/* ----------------------------------------------------------------- insights */
+.stat-list { display: grid; gap: 3px; }
+
 .stat {
-  display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; align-items: baseline;
-  padding: 12px; border-radius: var(--r-control);
-  transition: background-color 140ms var(--ease);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  align-items: baseline;
+  padding: 13px 14px;
+  border-radius: var(--radius);
+  transition-property: background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
 }
-.stat:hover { background: var(--surface-2); }
-.stat .stat-label { color: var(--ink); text-wrap: pretty; }
-.stat .stat-count {
-  color: var(--ink-3); font-size: 13px; white-space: nowrap;
+
+.stat:hover { background: oklch(1 0 0 / 0.035); }
+
+.stat-label { color: var(--foreground-2); font-size: 14px; line-height: 1.45; text-wrap: pretty; }
+
+.stat-count {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.stat .stat-bar {
-  grid-column: 1 / -1; height: 3px; border-radius: var(--r-pill);
-  background: var(--accent); opacity: 0.55; min-width: 8px;
+
+.stat-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  min-width: 4px;
+  margin-top: 5px;
+  background: linear-gradient(90deg, var(--primary), oklch(0.780 0.129 29.2 / 0.42));
+  border-radius: var(--radius-full);
 }
 
-.empty { padding: 8px 0 4px; }
-.empty-title { margin: 0 0 4px; font-weight: 600; color: var(--ink-2); }
-.empty .btn { margin-top: 14px; }
-.btn-quiet {
-  background: var(--surface-2); color: var(--ink); border-color: var(--line);
+.empty { padding: 6px 0 4px; }
+.empty-title { margin: 0 0 6px; color: var(--foreground); font-size: 14.5px; font-weight: 570; }
+.empty .field-hint { max-width: 52ch; margin-bottom: 0; }
+.empty .btn { margin-top: 16px; }
+
+/* ------------------------------------------------------------------- motion */
+/* Staged view entrance: opacity, a short lift and a blur, chunked by semantic
+ * group and offset ~90ms so the order communicates hierarchy. It runs once per
+ * view mount, never on hover and never on a repeated interaction. */
+/* Short on purpose. The blur makes text unreadable while it runs, so the total
+ * for the last group (delay plus duration) stays inside ~0.5s. */
+.enter { animation: enter 360ms var(--ease-out) both; }
+.enter-1 { animation-delay: 0ms; }
+.enter-2 { animation-delay: 70ms; }
+.enter-3 { animation-delay: 140ms; }
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(12px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+
+/* ---------------------------------------------------------------- utilities */
+.hidden { display: none !important; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 12px;
+  z-index: 50;
+  padding: 10px 16px;
+  background: var(--popover);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  color: var(--foreground);
+  font-size: 13.5px;
+  font-weight: 550;
   text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 160ms ease-out;
 }
-.btn-quiet:hover { background: var(--surface-3); }
 
-/* ------------------------------------------------------------------ motion */
+.skip:focus-visible { transform: translateY(0); }
 
-.spinner {
-  width: 15px; height: 15px; flex: none;
-  border: 2px solid var(--line); border-top-color: var(--accent);
-  border-radius: 50%;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-@media (prefers-reduced-motion: no-preference) {
-  .spinner { animation: spin 800ms linear infinite; }
-}
+/* Everything animated above is decorative or has a static equivalent, so all of
+ * it can stop without losing information. The aurora and the beam are parked on
+ * a fixed frame rather than removed, so the design still reads as designed. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
-  .btn:active, .beat:active, .cite:active, .suggestion:active { transform: none; }
+
+  .btn:active, .beat:active, .cite:active, .suggestion:active { scale: 1; }
+  .btn-primary::after { display: none; }
+  .card-lit::before { display: none; }
+
+  .card-beam::after {
+    background: conic-gradient(
+      from 214deg,
+      transparent 0deg 62deg,
+      var(--primary-line) 84deg,
+      var(--primary) 92deg,
+      var(--primary-line) 100deg,
+      transparent 122deg 360deg
+    );
+  }
 }

@@ -77,19 +77,33 @@ code become real formatting without a reply ever being parsed as markup.
 ## The interface
 
 One dark appearance, because every screen frames a Manim render on black and a
-light shell around it reads as a hole in the page. Colour is OKLCH, and two
-hues carry meaning: coral is the misconception and the one primary action per
-view, green means a machine checked it. Everything else is neutral, so a
-coloured pixel always means something.
+light shell around it reads as a hole in the page. Token names follow shadcn/ui
+conventions (`--background`, `--card`, `--primary`, `--muted-foreground`,
+`--border`, `--ring`) so the vocabulary is a familiar one, and the visual
+language is the one Aceternity popularised: an aurora wash behind glass panels,
+a cursor-tracked spotlight, a conic border beam, a shimmer across the primary
+action. All of it is hand-written CSS. There is no build step, and adding React,
+Tailwind and Framer Motion to a working vanilla frontend would have meant
+rebuilding the verified grounding client to arrive at the same pixels.
 
-Every foreground/background pair is measured rather than eyeballed. `--ink-2`
-clears APCA Lc 75 on all three surfaces, `--ink-3` clears 60, and the accent
-sits at lightness 0.780 for an unobvious reason: a saturated warm hue has very
-little contrast headroom, and that is the lightness where a near-black label on
-the filled button finally clears 60. No lightness of that hue reaches 75.
-`--line-control` is much brighter than the other hairlines because it is the
-only thing that says "you can type here", so it holds a real 3:1 against both
-the field fill and the panel behind it.
+Two hues carry meaning and nothing else does: coral is the student's error and
+the one primary action per view, green means a machine checked it. The violet
+and teal in the aurora are decorative and never appear on a control, a state or
+a value, so a coloured pixel still always means something.
+
+Every foreground/background pair is measured rather than eyeballed, including
+the worst case of a translucent card composited over the brightest point of the
+aurora. `--foreground-2` clears APCA Lc 75 on every surface, `--muted-foreground`
+clears 60, and `--primary` sits at lightness 0.780 for an unobvious reason: a
+saturated warm hue has very little contrast headroom, and that is the lightness
+where a near-black label on the filled button finally clears 60. No lightness of
+that hue reaches 75, which is why coral is never a body-text colour anywhere in
+the app: the false rule gets a coral rule down its edge, not coral text.
+
+Motion is expressive where it is rare (a view entrance, the diagnosis landing)
+and nearly invisible where it repeats (hover, focus, typing). Every animated
+state change also has a static cue, so `prefers-reduced-motion` switches the
+whole system off without losing information.
 
 ## Running it
 

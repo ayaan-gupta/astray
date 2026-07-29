@@ -5,43 +5,44 @@
       "source": "jakubkrehel/skills",
       "sourceType": "github",
       "skillPath": "skills/better-accessibility/SKILL.md",
-      "computedHash": "828416336ea982ac71add19e0998ce1dc560d28a912718693a01de7276594ac2"
+      "computedHash": "a240b853d5fcb82f70d560484100b59291fdb1eb47bfeab0cb53d586c4778c2b"
     },
     "better-colors": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",
       "skillPath": "skills/better-colors/SKILL.md",
-      "computedHash": "aee99741f731a9cbc0c2f3c782bdaaa39d4e4fedb657a7bdc80a6519f9a9a0da"
+      "computedHash": "ed532c387bb93c94df4f48a8f035d8627df9b6c3a26d09c16f305248b51d307a"
     },
     "better-interface": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",
       "skillPath": "skills/better-interface/SKILL.md",
-      "computedHash": "3d974ecb37be195d400cf964164ef5ac84cccd995b41847a46e344488be47e93"
+      "computedHash": "597ba2b155069cd5dc40863dbe1e950774c6580eeaff8d09c569d62a6ea70ed8"
     },
     "better-layout": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",
       "skillPath": "skills/better-layout/SKILL.md",
-      "computedHash": "d166f32df548e6da2d45677d959d7020668316b036e8c495b76233b05f7a6c4e"
+      "computedHash": "413d7ec94c19b518330724c7003e5aa72b4a48c3676fc603fad452df4a8ccd89"
     },
     "better-typography": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",
       "skillPath": "skills/better-typography/SKILL.md",
-      "computedHash": "a43f293432e6df33b62553b67bc1c60e01f7ec66894da9d6bdb8fb95027f6d8d"
+      "computedHash": "e22f30804f1dfaab5581000c17af5b25aa2e0e7d8186da4f192ff7c95ebbf2e8"
     },
     "better-ui": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",
       "skillPath": "skills/better-ui/SKILL.md",
-      "computedHash": "d9924d70217ff33a659bafcf78b68189156c406c633e4e958c7d764b3b528517"
+      "computedHash": "d0ad037f2f5bdf510ad78c501745cfb96804951925339da5a834684a0f2d1b19"
     },
     "better-writing": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",
       "skillPath": "skills/better-writing/SKILL.md",
-      "computedHash": "ea8e80fe5c72ff3b8c04956dc6c92fa86723f83c9d90674db9edba1cc621d344"
+      "computedHash": "23c459bfbb8c7e097eaf9b1ebd7c1b7677e52343f06437aaec5f4bb065661984"
     }
-  }
+  },
+  "note": "Re-pinned from a clean `npx skills add` on 2026-07-29; the previous hashes were computed before .agents/ existed and after ruff had reformatted the vendored markdown."
 }
