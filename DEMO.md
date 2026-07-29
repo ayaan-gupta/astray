@@ -36,6 +36,25 @@ than the correct one and a thick red **X** is drawn straight over it, so the
 thing the beat exists to show is unreadable. Frames extracted at 31s, 33s, 35s
 and 37s all look the same, so it is not a transient mid-animation state.
 
+## The golden video is silent
+
+Narration is built and wired, but `fish.audio` returned **HTTP 402 Insufficient
+API credit** for this key, so nothing has been synthesised yet. Note that
+fish.audio bills API credit *separately* from website/platform credit: top up at
+<https://fish.audio/app/developers> specifically, not the main billing page.
+
+Once there is credit, narrating the golden session is one command:
+
+```bash
+uv run python scripts/narrate_session.py 12a959d5-3a99-4343-a360-b681dd2aebbc
+```
+
+It writes `narrated.mp4` beside the render and repoints the session at it, so the
+page serves the narrated video with no other change. Everything downstream of the
+TTS call is already verified against this exact video: clips land at 5.000,
+11.400, 16.200, 23.200 and 29.800 seconds against measured beat starts of 5.0,
+11.4, 16.2, 23.2 and 29.8, and the 34.8s duration is preserved.
+
 ## Before recording
 
 Adopt the golden session's anonymous handle so **Insights → Your patterns**

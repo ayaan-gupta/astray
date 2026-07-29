@@ -28,6 +28,7 @@ import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from server.audio.pipeline import add_narration
 from server.charter.chain import ProgressEvent
 from server.charter.contracts import Diagnosis, StageName, StudentSubmission
 from server.charter.stages.s2_intent import analyse_intent
@@ -248,6 +249,22 @@ class Pipeline:
             # seeks to an estimated timestamp points at the wrong moment, which
             # is worse than not citing.
             repo.save_beat_timings(self._conn, session_id, result.timings)
+            # Narration has to come after this line, not before it: every spoken
+            # line is budgeted against a beat's measured duration, so writing the
+            # script any earlier would be guessing at how long each beat lasts.
+            # It never raises, and a failure leaves the silent render in place.
+            if result.video_path:
+                narration = await add_narration(
+                    self._conn,
+                    session_id=session_id,
+                    video_path=result.video_path,
+                    settings=self._settings,
+                    llm=self._client,
+                )
+                if narration.ok:
+                    result = result.model_copy(update={"video_path": narration.video_path})
+                elif narration.skipped_reason:
+                    logger.info("no narration for %s: %s", session_id, narration.skipped_reason)
             repo.set_session_status(self._conn, session_id, "ready")
         return result
 

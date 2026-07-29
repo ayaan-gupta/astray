@@ -74,6 +74,35 @@ the `Authorization` header straight through to the SSE stream.
 client tokenises it and builds the elements itself, so bullets, bold and inline
 code become real formatting without a reply ever being parsed as markup.
 
+## Narration
+
+The video gets a spoken track, and the ordering is the whole design: the script
+is written **after** the render, not before it. Only then are the beat timings
+measured, and a script written from the storyboard would be guessing at how long
+each beat lasts. Narration that guesses is narration that talks over the next
+visual.
+
+So each beat's measured duration becomes a word budget the line has to fit, the
+clips are placed at the beats' measured starts, and the mix is muxed in without
+re-encoding the video. Two clips never overlap: a line that outruns its beat
+pushes the next one later rather than talking over it, because two voices at once
+is unintelligible while a line arriving a fraction late is barely noticeable and
+self-corrects at the next beat with spare room. Audio is never time-stretched to
+fit, which is the artificial sound this feature exists to avoid.
+
+Sounding natural turns out to be mostly a text problem rather than a model one.
+Handed `(y+3)^2`, every engine says "caret two" or nothing. So the prompt asks
+for maths the way a teacher says it out loud, and `server/audio/speech.py` is the
+net for what slips through: `(y+3)^2` becomes "y plus three, all squared", `6y`
+becomes "six y", `2ab` becomes "two a b". "All squared" is the phrase the whole
+product turns on, because it is what distinguishes the correct expansion from the
+misconception. Punctuation is left alone deliberately, since it is the only
+control over where the voice breathes.
+
+Narration is non-fatal. A silent video is a working session; a render discarded
+because a voice API was down is not, so every failure logs and leaves the
+original video in place.
+
 ## The interface
 
 One dark appearance, because every screen frames a Manim render on black and a

@@ -243,6 +243,26 @@ def record_render(
     return int(cur.lastrowid)
 
 
+def set_render_video(conn: sqlite3.Connection, *, session_id: str, video_path: str) -> bool:
+    """Repoint the latest successful render at a different file.
+
+    Narration muxes a new mp4 beside the original and this is how the session
+    starts serving it. It updates `video_path` in place rather than appending a
+    row, because `attempt`, `status` and `mode` describe how codegen went, and
+    adding a synthetic attempt for a post-processing step would corrupt exactly
+    the "how often does the generated scene work" measurement this table exists
+    to answer. Returns False when there is no successful render to repoint.
+    """
+    cur = conn.execute(
+        """UPDATE renders SET video_path = ?
+             WHERE id = (SELECT id FROM renders
+                           WHERE session_id = ? AND status = 'ok'
+                           ORDER BY id DESC LIMIT 1)""",
+        (video_path, session_id),
+    )
+    return cur.rowcount > 0
+
+
 def latest_render(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM renders WHERE session_id = ? AND status = 'ok' ORDER BY id DESC LIMIT 1",

@@ -14,6 +14,10 @@ class StageName(StrEnum):
     VISUAL = "s6_visual"
     SCENE = "s7_scene"
     VALIDATE = "s8_validate"
+    # Runs after the render rather than before it: the narration script is
+    # budgeted against each beat's measured duration, so it cannot be written
+    # until the container has reported its clock.
+    NARRATE = "s9_narrate"
 
 
 class LlmCallMeta(BaseModel):

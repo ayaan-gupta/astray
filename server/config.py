@@ -28,6 +28,25 @@ class Settings(BaseSettings):
     llm_timeout_s: int = 240
     llm_max_retries: int = 2
 
+    # Narration. Written after the render, never before: the script is budgeted
+    # against each beat's *measured* duration, so it cannot be produced until the
+    # renderer has reported its clock. s2.1-pro is Fish Audio's current top
+    # model; latency is irrelevant here because the render already took minutes,
+    # so every setting below trades speed for naturalness.
+    fish_api_key: str | None = None
+    fish_base_url: str = "https://api.fish.audio"
+    fish_model: str = "s2.1-pro"
+    # A voice id from fish.audio. Unset uses the model's own default voice, which
+    # is a reasonable narrator; set it to keep one voice across every render.
+    fish_voice_id: str | None = None
+    narration_enabled: bool = True
+    narration_timeout_s: int = 120
+    # Clear teaching speech, measured rather than assumed: see tests. Used to turn
+    # a beat's duration into a word budget the script has to fit.
+    narration_words_per_second: float = 2.5
+    # Slightly under real time. Maths needs a fraction more room than prose.
+    narration_speed: float = 0.96
+
     fake_llm: bool = False
     db_path: Path = Path("data/tutor.db")
     media_root: Path = Path("media")
@@ -39,6 +58,10 @@ class Settings(BaseSettings):
     @property
     def vision_enabled(self) -> bool:
         return bool(self.gemini_api_key)
+
+    @property
+    def narration_available(self) -> bool:
+        return self.narration_enabled and bool(self.fish_api_key)
 
 
 @lru_cache
