@@ -115,14 +115,20 @@ _GENERIC_CHAT_ERROR = "the tutor is temporarily unavailable"
 
 
 class _NoCacheStatic(StaticFiles):
-    """Serve the app shell with revalidation forced.
+    """Serve the app shell with caching switched off entirely.
 
     StaticFiles' default ETag/Last-Modified handling lets a browser keep serving
-    a cached app.js from memory without revalidating, so a deployed frontend fix
-    does not reach anyone who already has the page open or in cache. This cost
-    real debugging time during development -- a corrected script was being served
-    by the server and ignored by the browser, which reads exactly like a code bug.
-    The shell is a few KB; correctness beats the saved round-trip.
+    a cached app.js without revalidating, so a frontend fix does not reach anyone
+    who already has the page open or in cache. A corrected script was being
+    served by the server and ignored by the browser, which reads exactly like a
+    code bug.
+
+    `no-cache, must-revalidate` was the first attempt and was not enough: it
+    permits the browser to *store* the response and reuse it from the in-memory
+    cache for the life of a document, so a reload that reuses the same document
+    still runs the old script. `no-store` forbids storing it at all, which is
+    the only version of this that actually holds. The shell is a few KB, so the
+    saved round-trip was never worth a stale frontend.
     """
 
     def is_not_modified(self, response_headers, request_headers) -> bool:
@@ -130,7 +136,8 @@ class _NoCacheStatic(StaticFiles):
 
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
         return response
 
 
