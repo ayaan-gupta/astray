@@ -34,7 +34,95 @@ DIAGNOSIS = {
 }
 
 
+# /stream now continues into the s2-s8 pipeline after the diagnosis, so the mock
+# transport has to answer every stage's schema, not just Diagnosis. Keyed on the
+# schema name the prompt asks for -- the same approach server/llm/fake.py uses,
+# and for the same reason: a module name never appears in prompt text, a contract
+# class name always does.
+_STAGE_REPLIES = {
+    "IntentAnalysis": {
+        "learner_goal": "g",
+        "assumed_knowledge": ["k"],
+        "knowledge_gap": "gap",
+        "tone": "encouraging",
+    },
+    "PrereqGraph": {
+        "nodes": [{"id": "p1", "concept": "c", "why_needed": "w"}],
+        "edges": [],
+        "entry_point": "p1",
+    },
+    "Curriculum": {
+        "steps": [{"order": 1, "concept": "c", "objective": "o"}],
+        "target_misconception": "(a+b)^2 -> a^2 + b^2",
+    },
+    "MathContent": {
+        "worked_example": ["a"],
+        "counter_example": ["b"],
+        "key_identity": "k",
+        "concrete_numbers": [],
+    },
+    "Storyboard": {
+        "beats": [
+            {
+                "id": f"b{i}",
+                "title": f"t{i}",
+                "teaching_purpose": "p",
+                "on_screen": "o",
+                "targets_misconception": i == 2,
+                "primitive": "algebra_steps",
+            }
+            for i in (1, 2, 3)
+        ],
+        "total_estimated_seconds": 40,
+    },
+    "SceneCode": {
+        "scene_class_name": "AstrayScene",
+        "code": (
+            "from manim import *\n"
+            "from primitives.beats import beat\n"
+            "class AstrayScene(Scene):\n"
+            "    def construct(self):\n"
+            '        with beat(self, "b1"): self.wait(1)\n'
+            '        with beat(self, "b2"): self.wait(1)\n'
+            '        with beat(self, "b3"): self.wait(1)\n'
+        ),
+        "beats_covered": ["b1", "b2", "b3"],
+    },
+}
+
+
+def _try_stage_reply(request: httpx.Request) -> httpx.Response | None:
+    """Answer any s2-s8 stage call, or None if this is not one.
+
+    Every test handler delegates here first. /stream runs the whole pipeline now,
+    so a handler that only answers Diagnosis makes the planning stages fail schema
+    validation and the session end at `animation_failed` -- which would look like a
+    product bug in tests that are actually about something else entirely.
+    """
+    body = json.loads(request.content)
+    prompt = json.dumps(body.get("messages", ""))
+    for name, reply in _STAGE_REPLIES.items():
+        if name in prompt:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": json.dumps(reply)},
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+    return None
+
+
 def _handler(request: httpx.Request) -> httpx.Response:
+    staged = _try_stage_reply(request)
+    if staged is not None:
+        return staged
     body = json.loads(request.content)
     if body.get("tools"):
         args = json.dumps({"same_as_id": None, "new_slug": "fd", "reasoning": "n"})
@@ -87,6 +175,7 @@ def client(tmp_path):
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -154,6 +243,9 @@ def test_reconnecting_stream_replays_terminal_state_without_rerunning(tmp_path):
     calls = {"diagnose": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        staged = _try_stage_reply(request)
+        if staged is not None:
+            return staged
         body = json.loads(request.content)
         if body.get("tools"):
             args = json.dumps({"same_as_id": None, "new_slug": "fd", "reasoning": "n"})
@@ -204,6 +296,7 @@ def test_reconnecting_stream_replays_terminal_state_without_rerunning(tmp_path):
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -236,6 +329,9 @@ def test_second_stream_call_while_in_progress_returns_409(tmp_path):
     against the first."""
 
     async def slow_handler(request: httpx.Request) -> httpx.Response:
+        staged = _try_stage_reply(request)
+        if staged is not None:
+            return staged
         body = json.loads(request.content)
         if body.get("tools"):
             args = json.dumps({"same_as_id": None, "new_slug": "fd", "reasoning": "n"})
@@ -286,6 +382,7 @@ def test_second_stream_call_while_in_progress_returns_409(tmp_path):
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -341,6 +438,9 @@ async def test_concurrent_stream_requests_only_one_wins_the_race(tmp_path):
     calls = {"diagnose": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        staged = _try_stage_reply(request)
+        if staged is not None:
+            return staged
         body = json.loads(request.content)
         if body.get("tools"):
             args = json.dumps({"same_as_id": None, "new_slug": "fd", "reasoning": "n"})
@@ -388,7 +488,11 @@ async def test_concurrent_stream_requests_only_one_wins_the_race(tmp_path):
 
     db_path = tmp_path / "t.db"
     settings = Settings(
-        _env_file=None, deepseek_api_key="sk-test", db_path=db_path, media_root=tmp_path / "media"
+        _env_file=None,
+        deepseek_api_key="sk-test",
+        db_path=db_path,
+        render_enabled=False,
+        media_root=tmp_path / "media",
     )
     app = create_app(
         settings=settings,
@@ -503,6 +607,7 @@ def test_non_llm_error_during_diagnosis_marks_session_failed_not_wedged(tmp_path
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -576,6 +681,7 @@ def test_api_never_returns_secrets_from_a_reflecting_upstream(tmp_path):
         gemini_api_key=gemini_secret,
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -623,6 +729,7 @@ def test_reconnecting_stream_after_failure_replays_error_not_done(tmp_path):
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -674,6 +781,7 @@ def test_photo_upload_succeeds_when_vision_enabled(tmp_path):
         gemini_api_key="AQ.test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -726,6 +834,7 @@ def test_photo_upload_records_the_gemini_call_in_the_ledger(tmp_path):
         deepseek_api_key="sk-test",
         gemini_api_key="AQ.test",
         db_path=db_path,
+        render_enabled=False,
         media_root=tmp_path / "media",
     )
     app = create_app(
@@ -826,6 +935,7 @@ def test_unexpected_error_returns_500_without_leaking_detail(tmp_path, monkeypat
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -861,6 +971,9 @@ async def test_disconnected_stream_still_diagnoses_and_persists(tmp_path):
     """
 
     async def slow_handler(request: httpx.Request) -> httpx.Response:
+        staged = _try_stage_reply(request)
+        if staged is not None:
+            return staged
         body = json.loads(request.content)
         if body.get("tools"):
             args = json.dumps({"same_as_id": None, "new_slug": "fd", "reasoning": "n"})
@@ -911,6 +1024,7 @@ async def test_disconnected_stream_still_diagnoses_and_persists(tmp_path):
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,
@@ -1030,7 +1144,11 @@ async def test_shutdown_fails_unfinished_background_run_instead_of_leaving_in_pr
 
     db_path = tmp_path / "t.db"
     settings = Settings(
-        _env_file=None, deepseek_api_key="sk-test", db_path=db_path, media_root=tmp_path / "media"
+        _env_file=None,
+        deepseek_api_key="sk-test",
+        db_path=db_path,
+        render_enabled=False,
+        media_root=tmp_path / "media",
     )
     app = create_app(
         settings=settings,
@@ -1170,6 +1288,7 @@ def photo_client(tmp_path):
         deepseek_api_key="sk-test",
         db_path=tmp_path / "t.db",
         media_root=tmp_path / "media",
+        render_enabled=False,
     )
     app = create_app(
         settings=settings,

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astray — find where your reasoning went astray</title>
+<link rel="stylesheet" href="/style.css">
+<script defer src="/app.js"></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="#/">Astray<span class="dot">.</span></a>
+  <nav>
+    <a href="#/" data-nav="submit">Submit</a>
+    <a href="#/insights" data-nav="insights">Insights</a>
+  </nav>
+</header>
+
+<main id="view"></main>
+
+<!-- ---------------------------------------------------------------- SUBMIT -->
+<template id="tpl-submit">
+  <section class="pane narrow">
+    <h1>Where did it go wrong?</h1>
+    <p class="lede">Give us the problem and your own attempt — mistakes included.
+      Astray finds the exact step your reasoning left the correct path, then animates that moment.</p>
+
+    <div class="tabs">
+      <button class="tab is-active" data-tab="typed">Type it</button>
+      <button class="tab" data-tab="photo">Photograph it</button>
+    </div>
+
+    <form id="form-typed" class="tabpanel">
+      <label>Problem
+        <input name="problem" required placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
+      </label>
+      <label>Your working — one step per line
+        <textarea name="work" rows="6" placeholder="(x+5)^2&#10;= x^2 + 25"></textarea>
+      </label>
+      <button class="primary" type="submit">Diagnose my work</button>
+    </form>
+
+    <form id="form-photo" class="tabpanel hidden">
+      <label>Problem
+        <input name="problem" required placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
+      </label>
+      <label class="drop" id="drop">
+        <input type="file" name="file" accept="image/*" hidden>
+        <span>Drop a photo of your handwritten work, or click to choose</span>
+      </label>
+      <div id="review" class="hidden">
+        <h3>Check the transcription</h3>
+        <p class="hint">We read your photo as the lines below. Fix anything we got wrong —
+          this is what gets diagnosed, so it has to be what you actually wrote.</p>
+        <div id="review-lines"></div>
+        <button class="primary" id="confirm-btn" type="button">This is my work — diagnose it</button>
+      </div>
+    </form>
+    <p class="err" id="submit-err"></p>
+  </section>
+</template>
+
+<!-- --------------------------------------------------------------- SESSION -->
+<template id="tpl-session">
+  <section class="pane">
+    <div id="diagnosis" class="card diagnosis pending">
+      <div class="spinner"></div>
+      <p class="muted">Reading your working…</p>
+    </div>
+
+    <div class="theater">
+      <div class="stage">
+        <div id="player-wrap" class="player empty">
+          <div class="pipeline" id="pipeline">
+            <ol id="stage-list"></ol>
+          </div>
+        </div>
+        <div id="rail" class="rail"></div>
+      </div>
+
+      <aside class="chat">
+        <h3>Ask about it</h3>
+        <div id="messages" class="messages"></div>
+        <form id="chat-form">
+          <input id="chat-input" placeholder="Why doesn't that work?" autocomplete="off" disabled>
+          <button class="primary" type="submit" disabled>Send</button>
+        </form>
+        <p class="hint" id="chat-hint">Chat opens as soon as the diagnosis lands — you don't
+          have to wait for the animation.</p>
+      </aside>
+    </div>
+  </section>
+</template>
+
+<!-- -------------------------------------------------------------- INSIGHTS -->
+<template id="tpl-insights">
+  <section class="pane narrow">
+    <h1>What people get wrong</h1>
+    <p class="lede">Every diagnosis is canonicalised onto a shared misconception, so the same
+      error made with different letters counts once. Nothing here identifies anyone.</p>
+    <h2>Your patterns</h2>
+    <div id="history"></div>
+    <h2>Across everyone</h2>
+    <div id="frequency"></div>
+  </section>
+</template>
+</body>
+</html>

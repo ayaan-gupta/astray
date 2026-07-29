@@ -127,7 +127,13 @@ class Pipeline:
             yield self._completed(StageName.SCENE, meta, {"scene_class": scene.scene_class_name})
         except LlmError as exc:
             logger.warning("pipeline planning failed for %s: %s", session_id, exc)
-            repo.set_session_status(self._conn, session_id, "failed")
+            # NOT "failed": the diagnosis succeeded and is already persisted, and
+            # it is the thing this product exists to produce. Marking the whole
+            # session failed here would hide a correct, verified diagnosis behind
+            # an animation problem the student does not care about. A distinct
+            # status keeps the failure honest and visible without discarding the
+            # result the student came for.
+            repo.set_session_status(self._conn, session_id, "animation_failed")
             # Upstream text is never forwarded (it has carried an auth header
             # before); the detail is logged server-side only.
             yield ProgressEvent(
@@ -140,6 +146,20 @@ class Pipeline:
 
     async def _render_loop(self, session_id, scene, board, math) -> AsyncIterator[ProgressEvent]:
         """Validate -> render -> repair, bounded, then the deterministic fallback."""
+        if not self._settings.render_enabled:
+            # Planning is done and the beats are persisted, so the session is
+            # fully diagnosed and its rail is populated -- there is simply no
+            # video. Still validate, so a codegen regression is caught even where
+            # rendering is off.
+            report = validate_scene(scene, board)
+            yield ProgressEvent(
+                type="stage_completed",
+                stage=StageName.VALIDATE,
+                payload={"ok": report.ok, "attempt": 1, "issues": len(report.issues)},
+            )
+            repo.set_session_status(self._conn, session_id, "diagnosed")
+            return
+
         attempt = 0
         max_attempts = self._settings.render_max_repairs + 1
 
@@ -197,7 +217,8 @@ class Pipeline:
             yield self._render_done(result, attempt + 1)
             return
 
-        repo.set_session_status(self._conn, session_id, "render_failed")
+        # Same reasoning as the planning-failure path: the diagnosis stands.
+        repo.set_session_status(self._conn, session_id, "animation_failed")
         yield ProgressEvent(
             type="error", stage=StageName.VALIDATE, message="could not render the animation"
         )

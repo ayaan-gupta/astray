@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     deepseek_model_fast: str = "deepseek-v4-flash"
     gemini_model_vision: str = "gemini-3.5-flash-lite"
 
+    # Rendering needs a working Docker daemon and the manim image. Disabled, the
+    # chain still plans the animation (s2-s8) and persists the beats, but never
+    # starts a container -- which is what tests do (no test may touch docker, for
+    # the same reason none may touch the network) and what a host without Docker
+    # should do rather than failing every session.
+    render_enabled: bool = True
     render_timeout_s: int = 300
     render_max_repairs: int = 2
     llm_timeout_s: int = 240

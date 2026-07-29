@@ -6,9 +6,9 @@ Most math tools tell you the answer is wrong. Astray finds the exact step where
 your reasoning left the correct path, names the false rule you were actually
 applying, and builds an animated explanation of that specific misconception.
 
-Status: **Phase 1 complete** — ingestion and the diagnosis engine. Animation
-rendering (Phase 2) and the grounded chat tutor (Phase 3) are specified but not
-yet built.
+Status: **complete end to end.** Submit typed or photographed work, get a
+falsifiable diagnosis, watch an animation generated for your specific error, and
+ask a tutor that cites moments in that animation by timestamp.
 
 ## What it does today
 
@@ -52,6 +52,20 @@ The check runner enforces a character allow-list (no quotes, brackets, attribute
 chains, or dunders) and a killable wall-clock bound, because both RCE and
 non-terminating-power-tower DoS were reproduced against the naive version.
 
+**The animation is grounded, and the grounding is enforced.** `s6` plans beats,
+`s7` must wrap each in `with beat(self, "bN")`, and `s8` fails the render if any
+planned beat is missing, duplicated, or computed at runtime. The container
+measures each beat's real start and end from the renderer clock, so a chat
+citation seeks to a moment that actually exists. Unknown beat ids in a reply are
+stripped server-side rather than shown as dead links.
+
+**Generated code is untrusted.** It runs behind an AST allow-list (imports
+limited to `manim`, `numpy`, `math`, `primitives`; no dunder attribute access)
+*and* inside a `--network=none`, read-only, non-root container with memory, CPU
+and PID caps and a wall clock enforced twice. Neither layer is trusted alone. If
+codegen fails twice, a deterministic renderer builds the same beats with no
+model-authored code at all.
+
 **Secrets never leave the server.** Keys live only in a gitignored `server/.env`.
 Upstream error text never reaches a client — a DeepSeek error body once reflected
 the `Authorization` header straight through to the SSE stream.
@@ -77,7 +91,12 @@ Set `FAKE_LLM=1` to run against canned responses with no network and no cost.
 | `POST` | `/api/sessions/{id}/photo` | Transcribe handwritten work into the session |
 | `PUT` | `/api/sessions/{id}/submission` | Confirm/correct the transcription before diagnosis |
 | `GET` | `/api/sessions/{id}` | Session state and diagnosis, if ready |
-| `GET` | `/api/sessions/{id}/stream` | SSE: run the diagnosis, stream progress |
+| `GET` | `/api/sessions/{id}/stream` | SSE: diagnosis, then s2–s8 and the render |
+| `GET` | `/api/sessions/{id}/beats` | Beat rail: plan plus measured timings |
+| `GET` | `/media/{id}/video.mp4` | The rendered animation (range requests) |
+| `POST` | `/api/sessions/{id}/chat` | Grounded reply citing `[beat:bN]` |
+| `GET` | `/api/sessions/{id}/peers` | "N other students made this error" |
+| `GET` | `/api/insights` | Misconception frequency and personal history |
 
 `/stream` claims a session with a compare-and-swap, so concurrent connections
 cannot double-bill the same run; reconnecting to a finished session replays the
@@ -91,7 +110,7 @@ with KaTeX in the review field.
 ## Development
 
 ```bash
-uv run pytest          # 291 tests, no network — all HTTP via MockTransport
+uv run pytest          # 340 tests; no network and no Docker — both are mocked
 uv run ruff check .
 uv run ruff format --check .
 uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model
@@ -101,5 +120,9 @@ The eval harness scores rule match, topic match, and SymPy verification rate.
 Rule match is currently **not** a trustworthy gate — see the plan's Definition
 of Done for why the scorer rejects substantively correct diagnoses on notation.
 Topic match and verification rate are reliable.
+
+Rendering needs Docker and `manimcommunity/manim:stable`. Set `RENDER_ENABLED=0`
+to plan animations without running containers — the pipeline still produces beats,
+so chat stays grounded by title.
 
 Design and plan documents live in `docs/superpowers/`.

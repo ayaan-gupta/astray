@@ -248,3 +248,33 @@ def latest_render(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | No
         "SELECT * FROM renders WHERE session_id = ? AND status = 'ok' ORDER BY id DESC LIMIT 1",
         (session_id,),
     ).fetchone()
+
+
+def save_chat_message(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    role: str,
+    content: str,
+    cited_beats: list[str] | None = None,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO chat_messages (session_id, role, content, cited_beats_json) VALUES (?,?,?,?)",
+        (session_id, role, content, json.dumps(cited_beats or [])),
+    )
+    return int(cur.lastrowid)
+
+
+def list_chat(conn: sqlite3.Connection, session_id: str, limit: int = 50) -> list[sqlite3.Row]:
+    """Most recent `limit` messages, oldest first.
+
+    The subquery takes the newest rows and the outer query restores chronological
+    order -- a plain `ORDER BY id LIMIT n` would return the OLDEST messages, which
+    is the opposite of the context a conversation needs.
+    """
+    return conn.execute(
+        """SELECT * FROM (
+               SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT ?
+           ) ORDER BY id""",
+        (session_id, limit),
+    ).fetchall()

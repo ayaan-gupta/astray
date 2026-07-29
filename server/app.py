@@ -73,25 +73,29 @@ import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.charter.chain import Chain, ProgressEvent
-from server.charter.contracts import StageName, StudentSubmission
+from server.charter.contracts import Diagnosis, StageName, StudentSubmission
+from server.charter.pipeline import Pipeline
 from server.charter.stages.s0_ingest import ingest_photo, ingest_typed, needs_review
 from server.config import Settings, get_settings
 from server.deps import build_llm_client, build_vision
-from server.llm.deepseek import DeepSeekClient
+from server.llm.deepseek import DeepSeekClient, LlmError
 from server.llm.vision import NullVision, VisionProvider, VisionUnavailable
-from server.store import repo
+from server.store import insights, repo
 from server.store.db import connect
 from server.store.seed_taxonomy import seed
+from server.tutor import chat
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +111,27 @@ SHUTDOWN_DRAIN_TIMEOUT_S = 25.0
 # Stable, generic client-facing messages -- never the real upstream/exception text.
 _GENERIC_DIAGNOSIS_ERROR = "diagnosis failed; please try again"
 _GENERIC_VISION_ERROR = "photo transcription is temporarily unavailable"
+_GENERIC_CHAT_ERROR = "the tutor is temporarily unavailable"
+
+
+class _NoCacheStatic(StaticFiles):
+    """Serve the app shell with revalidation forced.
+
+    StaticFiles' default ETag/Last-Modified handling lets a browser keep serving
+    a cached app.js from memory without revalidating, so a deployed frontend fix
+    does not reach anyone who already has the page open or in cache. This cost
+    real debugging time during development -- a corrected script was being served
+    by the server and ignored by the browser, which reads exactly like a code bug.
+    The shell is a few KB; correctness beats the saved round-trip.
+    """
+
+    def is_not_modified(self, response_headers, request_headers) -> bool:
+        return False
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
 
 
 class _BodyTooLarge(Exception):
@@ -212,6 +237,17 @@ class CreateSessionRequest(BaseModel):
         if not value.strip():
             raise ValueError("problem must not be blank")
         return value
+
+
+# Not a StageName member: chat is a product surface, not a pipeline stage. It
+# still belongs in the same cost ledger, so it gets a plain string label.
+_CHAT_STAGE = "chat"
+
+MAX_CHAT_CHARS = 2_000
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=MAX_CHAT_CHARS)
 
 
 class ConfirmSubmissionRequest(BaseModel):
@@ -536,8 +572,43 @@ def create_app(
 
         async def produce() -> None:
             try:
+                diagnosis: Diagnosis | None = None
+                terminal: ProgressEvent | None = None
                 async for event in chain.run_diagnosis(session_id, submission):
+                    if event.type == "diagnosis_ready" and event.payload:
+                        # Captured here rather than re-read from the DB so the
+                        # pipeline runs on exactly the object the student was
+                        # shown -- no window where the two could differ.
+                        diagnosis = Diagnosis.model_validate(
+                            {k: v for k, v in event.payload.items() if k != "misconception_id"}
+                        )
+                    if event.type == "done":
+                        # Held back, not forwarded yet. `done` means "the whole run
+                        # finished"; forwarding the diagnosis stage's own `done`
+                        # here would tell a client to stop listening just as the
+                        # animation pipeline starts reporting.
+                        terminal = event
+                        continue
                     await queue.put(event)
+
+                # The animation pipeline continues on the SAME stream. This is the
+                # answer to the latency finding: the diagnosis card renders at
+                # ~15-30s and chat opens against it immediately, while s2-s8 and
+                # the render (another ~3 minutes, dominated by s7 codegen) report
+                # progress into the same connection instead of leaving a blank
+                # screen for the rest of it.
+                if diagnosis is not None and not diagnosis.no_error_found:
+                    pipeline = Pipeline(
+                        connection,
+                        request.app.state.client,
+                        settings=request.app.state.settings,
+                    )
+                    async for event in pipeline.run(session_id, submission, diagnosis):
+                        await queue.put(event)
+
+                if terminal is not None:
+                    status = repo.get_session(connection, session_id)["status"]
+                    await queue.put(terminal.model_copy(update={"payload": {"status": status}}))
             except Exception:
                 # Chain's contract is "an LlmError becomes a terminal `error` event,
                 # everything else never raises" (see chain.py) -- this is a last-resort
@@ -586,5 +657,117 @@ def create_app(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @app.get("/api/sessions/{session_id}/beats")
+    def get_beats(session_id: str, request: Request) -> dict:
+        """The beat rail: plan plus measured timings, and the video if ready.
+
+        Beats are returned as soon as s6 plans them, with null timings, so the
+        rail can render greyed segments while the animation is still being made.
+        """
+        connection = conn_of(request)
+        if repo.get_session(connection, session_id) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        render = repo.latest_render(connection, session_id)
+        return {
+            "beats": [
+                {
+                    "id": row["beat_id"],
+                    "title": row["title"],
+                    "purpose": row["purpose"],
+                    "targets_misconception": bool(row["targets_misconception"]),
+                    "start_s": row["start_s"],
+                    "end_s": row["end_s"],
+                }
+                for row in repo.list_beats(connection, session_id)
+            ],
+            "video_url": f"/media/{session_id}/video.mp4" if render else None,
+            "render_mode": render["mode"] if render else None,
+        }
+
+    @app.get("/media/{session_id}/video.mp4")
+    def get_video(session_id: str, request: Request):
+        """Serve the rendered video.
+
+        The path comes from the `renders` row this server wrote, never from the
+        request, so a traversal attempt in `session_id` finds no row and 404s
+        rather than reaching the filesystem. FileResponse handles range requests,
+        which a video element needs to seek -- and seeking is the entire point of
+        beat citations.
+        """
+        connection = conn_of(request)
+        render = repo.latest_render(connection, session_id)
+        if render is None or not render["video_path"]:
+            raise HTTPException(status_code=404, detail="no rendered video for this session")
+        path = Path(render["video_path"])
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="rendered video is no longer on disk")
+        return FileResponse(path, media_type="video/mp4")
+
+    @app.post("/api/sessions/{session_id}/chat")
+    async def post_chat(session_id: str, body: ChatRequest, request: Request) -> dict:
+        connection = conn_of(request)
+        if repo.get_session(connection, session_id) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        try:
+            reply, cited, meta = await chat.answer(
+                connection,
+                request.app.state.client,
+                session_id=session_id,
+                question=body.message,
+                model=request.app.state.settings.deepseek_model_fast,
+            )
+        except ValueError as exc:
+            # No diagnosis yet: chat is grounded in one, so there is nothing to
+            # be grounded in. A client should wait for `diagnosis_ready`.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except LlmError as exc:
+            logger.warning("chat failed for session %s: %s", session_id, exc)
+            raise HTTPException(status_code=503, detail=_GENERIC_CHAT_ERROR) from exc
+        repo.record_artifact(
+            connection,
+            session_id=session_id,
+            stage=_CHAT_STAGE,
+            payload={"cited_beats": cited},
+            meta=meta,
+        )
+        return {"reply": reply, "cited_beats": cited}
+
+    @app.get("/api/sessions/{session_id}/chat")
+    def get_chat(session_id: str, request: Request) -> dict:
+        connection = conn_of(request)
+        if repo.get_session(connection, session_id) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {
+            "messages": [
+                {
+                    "role": row["role"],
+                    "content": row["content"],
+                    "cited_beats": json.loads(row["cited_beats_json"]),
+                }
+                for row in repo.list_chat(connection, session_id)
+            ]
+        }
+
+    @app.get("/api/sessions/{session_id}/peers")
+    def get_peers(session_id: str, request: Request) -> dict:
+        """ "N other students made this error" for this session. Aggregate only."""
+        connection = conn_of(request)
+        if repo.get_session(connection, session_id) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        return insights.peers_for_session(connection, session_id)
+
+    @app.get("/api/insights")
+    def get_insights(request: Request, handle: str | None = None) -> dict:
+        connection = conn_of(request)
+        return {
+            "misconceptions": insights.misconception_frequency(connection),
+            "history": insights.student_history(connection, handle) if handle else [],
+        }
+
+    _WEB_DIR = Path(__file__).parent.parent / "web"
+    if _WEB_DIR.is_dir():
+        # Mounted last so it cannot shadow any /api or /media route above.
+        app.mount("/", _NoCacheStatic(directory=_WEB_DIR, html=True), name="web")
 
     return app

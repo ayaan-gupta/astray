@@ -109,6 +109,24 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_renders_session ON renders(session_id);
     """,
+    # v3 -- Phase 3 tutor tables.
+    #
+    # `cited_beats_json` stores the beat ids a reply actually cited, AFTER
+    # server-side validation against the manifest. Keeping them as their own
+    # column rather than re-parsing `content` later means the grounding record
+    # survives any change to citation syntax, and makes "how often does the
+    # tutor ground its answers" a query rather than a regex over message text.
+    """
+    CREATE TABLE chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        cited_beats_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_chat_session ON chat_messages(session_id, id);
+    """,
 ]
 
 
