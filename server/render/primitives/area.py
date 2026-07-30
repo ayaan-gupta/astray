@@ -32,7 +32,8 @@ from manim import (
     Text,
     VGroup,
 )
-from primitives.layout import SAFE_HEIGHT, SAFE_WIDTH, clear_frame, fit, prose, safe_math
+from primitives.layout import SAFE_HEIGHT, SAFE_WIDTH, clear_frame, fit, safe_math
+from primitives.prose import prose
 
 # The square is drawn `a`-major on purpose: with a and b too close in length the
 # four cells look like a 2x2 grid of equals, and the point is that a^2 dominates

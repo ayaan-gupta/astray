@@ -9,6 +9,7 @@ helpers scale-to-fit rather than trusting the caller's sizing.
 import re
 
 from manim import DOWN, LEFT, RIGHT, FadeIn, FadeOut, Line, MathTex, Mobject, Text, VGroup
+from primitives.prose import prose
 
 # Manim's default frame is 8 units tall, 14.22 wide. Leaving a margin keeps text
 # clear of the edge on the 854x480 preview resolution the runner uses.
@@ -115,21 +116,6 @@ def label(value, font_size: int = 26, color=None):
     if _MATHISH.search(str(value)):
         return safe_math(value, font_size=font_size, color=color)
     return Text(str(value), font_size=font_size, color=color)
-
-
-def prose(text: str) -> str:
-    r"""Clean a caller-supplied sentence for `Text`, which has no LaTeX at all.
-
-    `Text` typesets `$` literally, and a model writing a caption about mathematics
-    reaches for `$3y$` by habit however firmly the prompt says not to: a live render
-    captioned its area model *"The two $3y$ rectangles are missing!"*, dollar signs
-    and all. Stripping the delimiters keeps the maths readable as plain text, which
-    is what a one-line caption wants anyway.
-
-    `\(...\)` is handled too, being the other delimiter pair the model reaches for.
-    """
-    out = re.sub(r"\\[()\[\]]", "", text.replace("$", ""))
-    return re.sub(r"\s+", " ", out).strip()
 
 
 def legend(entries: list[tuple[str, object]]) -> VGroup:

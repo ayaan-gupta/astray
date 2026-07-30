@@ -41,7 +41,7 @@ from manim import (
     VGroup,
 )
 from primitives.layout import clear_frame, fit, legend, safe_math
-from primitives.sampling import defined_range, guard, tick_step, y_window
+from primitives.sampling import decimal_places, defined_range, guard, tick_step, y_window
 
 # Sized to leave room for axis numbers, a legend across the top, and a caption
 # along the bottom edge without any of the three touching.
@@ -50,19 +50,24 @@ PLOT_HEIGHT = 4.9
 
 
 def make_axes(x_range: tuple[float, float], y_range: tuple[float, float]) -> Axes:
-    """Axes with readable ticks, sized to the safe area."""
+    """Axes with readable ticks, sized to the safe area.
+
+    Decimal places are set per axis from that axis's own step, because the two are
+    routinely different: a plot over x = 0 to 3 and y = -5 to 5 gets a 0.5 step
+    horizontally and a 2 step vertically. Forcing zero decimals on both, which is
+    what this did, printed the x axis as "0 . 2 . 2 . 2 . 3".
+    """
+    x_step = tick_step(x_range[1] - x_range[0])
+    y_step = tick_step(y_range[1] - y_range[0])
     return Axes(
-        x_range=[x_range[0], x_range[1], tick_step(x_range[1] - x_range[0])],
-        y_range=[y_range[0], y_range[1], tick_step(y_range[1] - y_range[0])],
+        x_range=[x_range[0], x_range[1], x_step],
+        y_range=[y_range[0], y_range[1], y_step],
         x_length=PLOT_WIDTH,
         y_length=PLOT_HEIGHT,
         tips=False,
-        axis_config={
-            "include_numbers": True,
-            "font_size": 20,
-            "decimal_number_config": {"num_decimal_places": 0},
-            "color": GREY_B,
-        },
+        axis_config={"include_numbers": True, "font_size": 20, "color": GREY_B},
+        x_axis_config={"decimal_number_config": {"num_decimal_places": decimal_places(x_step)}},
+        y_axis_config={"decimal_number_config": {"num_decimal_places": decimal_places(y_step)}},
     )
 
 

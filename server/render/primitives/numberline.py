@@ -14,7 +14,7 @@ says better than a string.
 
 from manim import BLUE, DOWN, RED, Create, Dot, FadeIn, NumberLine, VGroup
 from primitives.layout import clear_frame, fit, legend
-from primitives.sampling import tick_step
+from primitives.sampling import decimal_places, tick_step
 
 # Matches graph.PLOT_WIDTH so a beat mixing the two does not visibly change scale
 # between them.
@@ -41,27 +41,34 @@ def make_line(window: tuple[float, float]) -> NumberLine:
     its decimal, so the choice is made from the step and not hardcoded.
     """
     step = tick_step(window[1] - window[0])
-    places = 0 if step >= 1 and float(step).is_integer() else 1
     return NumberLine(
         x_range=[window[0], window[1], step],
         length=LINE_WIDTH,
         include_numbers=True,
         font_size=24,
-        decimal_number_config={"num_decimal_places": places},
+        decimal_number_config={"num_decimal_places": decimal_places(step)},
     )
 
 
 def _window(values: list[float], given: tuple[float, float] | None) -> tuple[float, float]:
-    """A window holding every value with room to breathe, centred on zero.
+    """A window spanning the marked values with room to breathe.
 
-    Centred deliberately: for a lost root the two solutions are symmetric about
-    zero, and an off-centre window makes the symmetry -- the reason the second
-    root exists at all -- look like an accident of framing.
+    Spans the values rather than centring on zero, and the difference is not
+    cosmetic. Forcing a zero-centred window put a comparison of 10 against 16 on a
+    line running -20 to 20, with both dots crowded into one eighth of it and most
+    of the line carrying nothing.
+
+    Symmetry survives anyway, and that is why spanning is safe: a lost root marks
+    -4 and 4, whose span is already centred on zero, so the symmetry that explains
+    why the second root exists still reads as symmetry.
     """
     if given:
         return given
-    reach = max((abs(v) for v in values), default=1.0) or 1.0
-    return (-reach * 1.4, reach * 1.4)
+    if not values:
+        return (-1.0, 1.0)
+    low, high = min(values), max(values)
+    pad = max((high - low) * 0.25, abs(high) * 0.15, 1.0)
+    return (low - pad, high + pad)
 
 
 def missing_roots(

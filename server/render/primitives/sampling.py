@@ -163,6 +163,21 @@ def guard(fn, lo: float, hi: float):
     return guarded
 
 
+def decimal_places(step: float) -> int:
+    """How many decimals a tick label needs, given the step between ticks.
+
+    Paired with `tick_step`, and not optional: a fractional step printed with zero
+    decimals produces *duplicate* labels, not merely coarse ones. A plot over
+    x = 0 to 3 gets a 0.5 step, which rounded to integers reads
+    "0 . 2 . 2 . 2 . 3" -- observed on a live chain-rule graph, where it looks like
+    a rendering fault rather than a rounding choice.
+
+    One decimal is enough for every step this module produces, since the steps are
+    snapped to 1/2/2.5/5 times a power of ten.
+    """
+    return 0 if step >= 1 and float(step).is_integer() else 1
+
+
 def tick_step(span: float) -> float:
     """A tick step giving roughly 4-8 labelled ticks across `span`.
 

@@ -54,10 +54,12 @@ def load_primitive(name: str):
 
 
 sampling = load_primitive("sampling")
+prose = load_primitive("prose").prose
 MIN_GAP_SAMPLES = sampling.MIN_GAP_SAMPLES
 SAMPLES = sampling.SAMPLES
 defined_range = sampling.defined_range
 guard = sampling.guard
+decimal_places = sampling.decimal_places
 tick_step = sampling.tick_step
 y_window = sampling.y_window
 
@@ -85,7 +87,7 @@ def _import_roots(module: Path) -> set[str]:
 
 def test_primitives_directory_is_not_empty():
     """Guards the two tests below: a bad glob would make both vacuously pass."""
-    assert len(_modules()) >= 6
+    assert len(_modules()) >= 8
 
 
 # Imports a primitive may hold beyond what generated code is allowed, each one
@@ -101,6 +103,8 @@ VETTED_EXTRA_IMPORTS = {
     "beats.py": {"contextlib", "json", "os"},
     # Classifies a label as prose or as mathematics. Pure string inspection.
     "layout.py": {"re"},
+    # Translates the LaTeX a model writes into a caption. Pure string rewriting.
+    "prose.py": {"re"},
 }
 
 
@@ -218,6 +222,62 @@ class TestDefinedRange:
     def test_the_returned_span_lies_inside_the_window(self):
         lo, hi = defined_range(lambda x: math.log(x), (-5.0, 5.0))
         assert -5.0 <= lo <= hi <= 5.0
+
+
+class TestProse:
+    """Captions are `Text`, which has no LaTeX, and the model writes LaTeX anyway.
+
+    Both inputs below are verbatim from live renders, and both reached the screen.
+    """
+
+    def test_dollar_delimiters_are_removed(self):
+        assert prose("The two $3y$ rectangles are missing!") == (
+            "The two 3y rectangles are missing!"
+        )
+
+    def test_a_caption_full_of_maths_becomes_readable(self):
+        assert prose(r"For y=1, (1+3)^2=16, but 1^2+3^2=10, so 16\neq10.") == (
+            "For y=1, (1+3)²=16, but 1²+3²=10, so 16≠10."
+        )
+
+    def test_a_command_is_translated_rather_than_deleted(self):
+        """Deleting it would turn a claim into its opposite-looking remains.
+
+        "so 16 \\neq 10" with the command dropped reads "so 16 10", which is worse
+        than the raw backslash: the sentence still looks finished and no longer says
+        anything.
+        """
+        assert "≠" in prose(r"16 \neq 10")
+        assert "16 10" not in prose(r"16 \neq 10")
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (r"a \times b", "a × b"),
+            (r"x \le 3", "x ≤ 3"),
+            (r"x = \pm 4", "x = ± 4"),
+            (r"\sqrt{16}", "√16"),
+            (r"x^{-1}", "x⁻¹"),
+            (r"x^n", "xⁿ"),
+            (r"a \rightarrow b", "a → b"),
+        ],
+    )
+    def test_common_constructs(self, raw, expected):
+        assert prose(raw) == expected
+
+    def test_a_longer_command_wins_over_its_own_prefix(self):
+        r"""`\neq` must not be matched as `\ne` followed by a stray `q`."""
+        assert prose(r"16 \neq 10") == "16 ≠ 10"
+
+    def test_an_unmapped_command_is_dropped_without_its_backslash(self):
+        assert "\\" not in prose(r"the \varnothing case")
+
+    def test_ordinary_prose_is_left_alone(self):
+        text = "these two are the middle term"
+        assert prose(text) == text
+
+    def test_whitespace_is_collapsed(self):
+        assert prose("a   b\n c") == "a b c"
 
 
 class FakeScene:
