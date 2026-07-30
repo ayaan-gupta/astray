@@ -134,10 +134,23 @@ the primitive the beat's `primitive` field names.
     title_card(text: str, subtitle: str = "") -> VGroup
     math_lines(lines: list[str], font_size: int = 40) -> VGroup
     caption(scene, text: str) -> Mobject
+    fit(mobject, width=12.0, height=6.5) -> Mobject   # scales down to the frame
 
 `title_card` and `math_lines` build a Mobject and return it *without* animating,
 so play them yourself and fade them out yourself. Every other helper above
 animates, and needs no `self.play` around it.
+
+### Building a beat by hand
+
+For a `custom` beat, or any part of a beat no helper covers, build your mobjects,
+collect them in one `VGroup`, and pass that group through `fit` before adding it.
+Then centre it, or `to_edge` it, as one group.
+
+This is not a style preference. A beat that positioned its own pieces with
+`.shift`, `.scale` and chained `.next_to` calls rendered a diagram a quarter of its
+intended size, jammed against the right edge of the frame with stray lines across
+it. Nothing had checked that the result fitted, because nothing was asked to.
+`fit` is that check, and one `VGroup` is what lets it apply to everything at once.
 
 Return only JSON matching the schema: `scene_class_name`, `code`, `beats_covered`.
 `code` is the complete file as a single string.
