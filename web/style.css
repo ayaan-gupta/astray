@@ -502,13 +502,43 @@ main:focus { outline: none; }
 
 .btn-send { flex: 0 0 auto; width: 42px; padding: 0; }
 
-/* The microphone. Square like the send button, quiet until it is live.
+/* The microphone, in four states.
  *
- * An always-visible state is the point. A microphone the page can open without
- * the student being able to tell at a glance reads as either broken or
- * sinister, so listening is the loudest state in the composer: the button fills
- * with the accent, and a ring pulses out of it for as long as the mic is open. */
+ * This is the whole reason the styling is worth this much room. The microphone
+ * can now be open without anyone having pressed anything, and a student who
+ * cannot tell at a glance whether it is listening will read the feature as
+ * either broken or sinister. So each state differs in more than one channel:
+ *
+ *   off        slashed glyph, quiet surface        -- a different shape, not a dimmer colour
+ *   armed      accent outline, slow breath          -- present, not demanding
+ *   capturing  filled accent, ring pulsing outward  -- the loudest thing in the composer
+ *   suspended  dimmed, no motion                    -- visibly stood down
+ *
+ * Shape carries `off` because colour alone would leave a colour-blind student
+ * with two indistinguishable quiet buttons, and `off` is the state whose
+ * misreading matters most. */
 .btn-mic { flex: 0 0 auto; width: 42px; padding: 0; }
+
+/* The slash only exists when muted. */
+.mic-slash { display: none; }
+.btn-mic.is-off .mic-slash { display: inline; }
+
+/* Armed: listening, and saying so without competing with the send button.
+ * An outline and a slow breath, against the filled accent of a live capture. */
+.btn-mic.is-armed {
+  --btn-fg: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+}
+
+.btn-mic.is-armed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--primary);
+  animation: mic-breathe 2.8s var(--ease) infinite;
+  pointer-events: none;
+}
 
 .btn-mic.is-live {
   --btn-bg: var(--primary);
@@ -526,15 +556,69 @@ main:focus { outline: none; }
   pointer-events: none;
 }
 
+/* Stood down while the tutor is talking. Deliberately inert: no pulse, no
+ * breath, because the point of the state is that nothing is being heard. */
+.btn-mic.is-suspended { opacity: 0.45; }
+
 @keyframes mic-pulse {
   from { opacity: 0.85; transform: scale(1); }
   to   { opacity: 0; transform: scale(1.42); }
 }
 
-/* A pulse is decoration on a state that is also carried by fill and by the
- * button's accessible name, so it is safe to drop entirely. */
+@keyframes mic-breathe {
+  0%, 100% { opacity: 0.15; }
+  50%      { opacity: 0.9; }
+}
+
+/* Motion is the redundant channel here, never the only one: every state is also
+ * a fill, a glyph and an accessible name. Dropping it costs nothing. */
 @media (prefers-reduced-motion: reduce) {
   .btn-mic.is-live::after { animation: none; opacity: 0.85; }
+  .btn-mic.is-armed::after { animation: none; opacity: 0.6; }
+}
+
+/* The wake toggle: the mute control, and the only place the state is written in
+ * words. Small, quiet, and never the thing you notice first -- but a student who
+ * wants to know whether the microphone is open should never have to interpret an
+ * icon to find out. */
+.wake {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-inline-start: auto;
+  padding: 5px 10px 5px 8px;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 550;
+  transition-property: color, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.wake:hover:not(:disabled) { color: var(--foreground-2); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.wake:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.wake.is-on { color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary-line); }
+
+.wake-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  transition: background-color 140ms ease-out;
+}
+
+.wake.is-on .wake-dot {
+  background: var(--primary);
+  animation: mic-breathe 2.8s var(--ease) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wake.is-on .wake-dot { animation: none; }
 }
 
 /* A play or arrow glyph sits right of its own optical centre, so a trailing

@@ -117,9 +117,10 @@ displays it and `/api/insights` never returns it.
    13.85s against that beat's measured start of 13.8s, and the rail's active chip
    follows the playhead as the video runs. Every chip is also a real accessible
    control ("Jump to 0:13, Area model"), so the rail is keyboard-reachable.
-4. **Chat** — ask one out loud with the microphone (see *Asking by voice* below;
-   grant the permission before recording). Three exchanges are already in the
-   database and every reply carries
+4. **Chat** — say *"Hey Astray, why doesn't my rule work"* (see *Asking by voice*
+   below; grant the permission and reload **before** recording, and press the
+   microphone button instead if the phrase misses). Three exchanges are already in
+   the database and every reply carries
    chips. The one to read aloud is *"Is my answer ever right, or is it always
    wrong?"*: the tutor answers the actual question, cites four beats, and describes
    the area model by its parts ("split into four pieces, `y^2`, `3y`, `3y`, and
@@ -133,25 +134,68 @@ displays it and `/api/insights` never returns it.
    statements are the taxonomy's own words, not the model's phrasing for this
    session, which is what makes them countable.
 
-## Asking by voice
+## Asking by voice: "Hey Astray"
 
-The composer has a microphone. Press it, ask the question out loud, stop talking,
-and it sends: the transcript appears in the box word by word as you speak, and a
-gap of about 1.6 seconds with nothing said ends the turn. Escape abandons it
-without sending. **Chrome or Edge only** -- the control hides itself entirely on
-Safari and Firefox, which have no `SpeechRecognition` -- and the mic permission
-prompt is a one-time click the browser will only accept from a real gesture, so
-grant it before you start recording rather than on camera.
+Say **"Hey Astray, why doesn't my rule work"** and it answers. No button.
 
-Pressing the mic **pauses the video**, deliberately. The narration is a voice
-explaining the mistake; left playing, the microphone hears it and the recogniser
-transcribes the tutor into the student's question. It does not resume by itself.
+The state is written out beside the chat heading, always, in words: *Hey Astray:
+listening* / *your turn* / *paused* / *off*. Click that chip to mute. The
+microphone button next to the composer shows the same three states and is also
+the direct route -- press it and it takes a question immediately, wake phrase or
+not, which is the thing to reach for if the room is loud.
 
-Two things worth knowing. The recogniser streams audio to Google's servers, so
-this is the one part of the product that is not local. And it is general
-speech-to-text rather than a maths recogniser: it will hear "y squared plus nine"
-correctly and it will not reliably hear "(y+3)²", so the natural demo question is
-a sentence, not an expression. **Type the expression, speak the question.**
+**Grant the microphone before you record.** Idle listening only starts on its own
+when the permission is already granted; when it isn't, the controls sit in *off*
+and wait for a click, because auto-arming into a surprise permission prompt is the
+behaviour that makes an always-on microphone feel like something done to you.
+Open the page, click the chip once, accept, reload.
+
+**Chrome or Edge only.** Both controls hide themselves entirely on Safari and
+Firefox, which have no `SpeechRecognition` at all.
+
+### What to expect, honestly
+
+**The wake phrase is edit distance on a general transcript, not a keyword model.**
+Chrome hears "hey a stray", "hey astro", "hey ashtray"; all of those match, by
+design. It will still miss occasionally and fire occasionally when it shouldn't.
+A real wake word (Porcupine, openWakeWord) is a trained on-device model, which is
+a different dependency and a trained keyword file. **If it misses on camera, press
+the microphone button** -- same turn, same everything, no wake phrase needed.
+
+**Idle listening degrades in a background tab.** Chrome throttles timers in a
+hidden tab, and always-on here is a restart loop built on a timer, so the gap
+between sessions stretches from a fifth of a second to a second or more, and
+after a few minutes hidden it may stop restarting altogether. Keep the tab
+fronted. (Found while testing: a stub run that should have taken two seconds took
+twenty, purely from throttling.)
+
+**There is no always-on API.** `continuous` is a request. Chrome ends a session by
+itself after roughly a minute, and sooner on silence, and restarting from `onend`
+*is* the mechanism. A recogniser that ends instantly five times in a row is
+treated as broken and listening stops rather than spinning.
+
+**The recogniser streams audio to Google's servers.** Idle listening means an open
+connection carrying whatever is said near the machine. That is the cost of
+always-on on this API, and it is why muting is a labelled control in the chat
+header rather than a preference hidden somewhere.
+
+**It is general speech-to-text, not a maths recogniser.** It hears "y squared plus
+nine" and it will not reliably hear "(y+3)²". **Type the expression, speak the
+question.**
+
+### The feedback loop, and why the video pauses
+
+While the animation is playing, the microphone is **closed**, not merely ignored:
+the state chip reads *paused*. The narration is a voice explaining the student's
+own mistake, in sentences full of the same words they would ask about -- and the
+tagline it reads aloud contains the wake word's own root. A live microphone hears
+the tutor, transcribes it, and either wakes on it or files the explanation as the
+student's next question. Muting the element is not enough on a laptop with open
+speakers, so the recogniser is shut. Listening resumes about eight tenths of a
+second after the audio stops, which covers the room's echo of it.
+
+Landing on the wake phrase pauses the video for the same reason, and plays a short
+blip so you know to start talking.
 
 ## The other two, each arguing a different way
 

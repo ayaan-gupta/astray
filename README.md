@@ -292,7 +292,7 @@ with KaTeX in the review field.
 ## Development
 
 ```bash
-uv run pytest          # 524 tests; no network and no Docker — both are mocked
+uv run pytest          # 530 tests; no network and no Docker — both are mocked
 uv run ruff check .
 uv run ruff format --check .
 uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model

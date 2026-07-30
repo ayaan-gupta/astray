@@ -25,24 +25,82 @@ def test_every_referenced_asset_exists():
     """A 404 on a script or a mask image is invisible until the feature is used."""
     html = read("index.html")
     css = read("style.css")
-    referenced = {"voice.js", "app.js", "style.css", "astray-mark.svg", "astray-wordmark.svg"}
+    referenced = {
+        "wake.js",
+        "voice.js",
+        "app.js",
+        "style.css",
+        "astray-mark.svg",
+        "astray-wordmark.svg",
+    }
     referenced |= {"astray-word.svg"} if "astray-word.svg" in css else set()
     for name in referenced:
         assert name in html or name in css, f"{name} is not referenced anywhere"
         assert (WEB / name).exists(), f"{name} is referenced but missing from web/"
 
 
-def test_voice_loads_before_the_app_that_uses_it():
-    """Both are `defer`, which runs them in document order, so order is the
-    contract: `createDictation` has to exist by the time `app.js` runs."""
+def test_scripts_load_in_dependency_order():
+    """All three are `defer`, which runs them in document order, so order is the
+    contract: `findWake` must exist before the state machine that calls it, and
+    `createDictation` before the view that looks for it."""
     html = read("index.html")
-    assert html.index("voice.js") < html.index("app.js")
+    assert html.index("wake.js") < html.index("voice.js") < html.index("app.js")
+
+
+def test_listening_is_deaf_while_suspended():
+    """The guard that makes the playback cooldown real rather than cosmetic.
+
+    `abort()` does not retract a result already in flight, so one arrives with
+    `suspended` already true. Without this check it is scanned for the wake phrase
+    like any other -- and the narration says the wake word's own root out loud, in
+    the tagline. A stub test caught the assistant waking itself."""
+    voice = read("voice.js")
+    handler = voice[voice.index("r.onresult = ") : voice.index("r.onerror = ")]
+    assert 'if (suspended || terminal || mode === "off")' in handler
+
+
+def test_a_capture_turn_returns_to_listening_not_to_off():
+    """The point of the change: a second question needs no button press."""
+    voice = read("voice.js")
+    assert 'mode = terminal ? "off" : "armed";' in voice
+
+
+def test_the_wake_phrase_requires_a_trigger_word():
+    """ "astray" is the product's name and the verb in its own tagline, which the
+    narration reads aloud. Matching the bare word would fire on the tutor."""
+    wake = read("wake.js")
+    assert "TRIGGERS" in wake
+    assert "hey" in wake
+
+
+def test_the_turn_is_ended_with_stop_not_abort():
+    """`abort()` discards the audio already captured, which is the tail of the
+    sentence, which is where the question is."""
+    voice = read("voice.js")
+    finish = voice[voice.index("function finish()") : voice.index("/* Enter the capture turn")]
+    assert "rec.stop()" in finish
+    assert "abort" not in finish
 
 
 def test_the_composer_ids_the_voice_wiring_expects_are_present():
     html = read("index.html")
-    for needed in ('id="mic-btn"', 'id="chat-input"', 'id="chat-hint"', 'id="chat-form"'):
+    for needed in (
+        'id="mic-btn"',
+        'id="chat-input"',
+        'id="chat-hint"',
+        'id="chat-form"',
+        'id="wake-toggle"',
+        'id="wake-label"',
+    ):
         assert needed in html, f"{needed} is gone; the voice wiring reads it by id"
+
+
+def test_muted_is_a_different_shape_and_not_only_a_different_colour():
+    """`off` is the state whose misreading matters most -- it is the difference
+    between a microphone the student thinks is closed and one that is open -- so it
+    carries a slashed glyph rather than only a dimmer surface."""
+    assert 'class="mic-slash"' in read("index.html")
+    assert ".btn-mic.is-off .mic-slash { display: inline; }" in read("style.css")
 
 
 def test_the_mic_starts_hidden_and_disabled():

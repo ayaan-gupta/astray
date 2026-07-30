@@ -344,6 +344,20 @@ function renderSession(sessionId) {
       const current = beats.find((b) => b.start_s !== null && t >= b.start_s && t < b.end_s);
       setActive(current ? current.id : null);
     };
+
+    /* The cooldown. While the narration plays, the microphone is closed: the
+     * narration is a voice talking about the student's own mistake, so a live
+     * recogniser hears the tutor and either finds a wake phrase in it or files
+     * the explanation as the student's next question. Listening comes back a beat
+     * after the audio stops, not immediately, so the room's echo does not land in
+     * the next turn.
+     *
+     * `playing` rather than `play`, because `play` fires before audio is actually
+     * coming out and the gap is enough for the first words to be heard. */
+    video.addEventListener("playing", () => dictation.suspend());
+    video.addEventListener("pause", () => dictation.resume());
+    video.addEventListener("ended", () => dictation.resume());
+
     drawRail();
   };
 
@@ -356,44 +370,113 @@ function renderSession(sessionId) {
    * bad transcript is visible in the transcript rather than hidden behind a
    * confirmation step.
    *
-   * Starting a turn pauses the video, and that is the whole of the feedback
-   * problem this feature has. The narration is a voice explaining the student's
-   * own mistake; left playing, the microphone hears it and the recogniser
-   * cheerfully transcribes the tutor into the student's question. Muting is not
-   * enough on a laptop with open speakers, so the audio stops at the source.
-   * It does not resume by itself -- a video that restarts while you are reading
-   * the answer you just asked for is worse than one you press play on. */
+   * The microphone is open before anyone presses anything, so the state has to be
+   * legible without being asked for. Three things carry it: the button's shape
+   * and fill, a labelled toggle beside the heading that says "listening" or "off"
+   * in words, and the hint line under the composer. Colour alone would not do it,
+   * which is why muted is a slashed microphone and not just a dimmer one. */
   const HINTS = {
-    idle: "Answers cite moments in your animation.",
-    listening: "Listening. Stop talking for a moment and I'll send it.",
+    off: "Voice is off. Turn on Hey Astray, or press the microphone to ask once.",
+    armed: "Listening for “Hey Astray”. Or press the microphone to ask now.",
+    capturing: "Listening. Stop talking for a moment and I'll send it.",
+    suspended: "Paused while the animation is playing.",
     blocked: "Microphone blocked. Allow it in your browser settings to ask by voice.",
-    error: "Voice input failed. Type the question instead.",
+    error: "Voice input stopped. Press the microphone to start it again.",
+  };
+
+  const WAKE_LABELS = {
+    off: "Hey Astray: off",
+    armed: "Hey Astray: listening",
+    capturing: "Hey Astray: your turn",
+    suspended: "Hey Astray: paused",
+    blocked: "Microphone blocked",
+    error: "Voice unavailable",
   };
 
   const mic = $("#mic-btn");
+  const wake = $("#wake-toggle");
+  // Whether always-on listening is wanted, remembered per browser. A student who
+  // muted it should not have to mute it again on the next question.
+  const wakeWanted = () => localStorage.getItem("astray.wake") !== "off";
+
   const dictation = window.createDictation({
     onInterim: (text) => { $("#chat-input").value = text; },
     onFinal: (text) => { $("#chat-input").value = ""; ask(text); },
+    /* The wake phrase landed. The video is paused defensively -- playback
+     * suspends listening, so in the ordinary case nothing is playing by the time
+     * we get here -- and a short blip confirms the phrase was heard, because
+     * without it the student cannot tell whether to start talking. */
+    onWake: () => {
+      if (video && !video.paused) video.pause();
+      blip();
+    },
     onState: (state) => {
-      const live = state === "listening";
-      mic.classList.toggle("is-live", live);
-      mic.setAttribute("aria-label", live ? "Stop and send" : "Ask by voice");
+      mic.classList.toggle("is-live", state === "capturing");
+      mic.classList.toggle("is-armed", state === "armed");
+      mic.classList.toggle("is-off", state === "off" || state === "error");
+      mic.classList.toggle("is-suspended", state === "suspended");
       mic.disabled = state === "blocked" || $("#chat-input").disabled;
-      $("#chat-input").placeholder = live ? "Listening…" : "Why doesn't that work?";
-      $("#chat-hint").textContent = HINTS[state] || HINTS.idle;
+      mic.setAttribute("aria-label",
+        state === "capturing" ? "Stop and send" : "Ask by voice");
+
+      wake.setAttribute("aria-pressed", String(state === "armed" || state === "capturing"
+        || state === "suspended"));
+      wake.classList.toggle("is-on", state === "armed" || state === "capturing");
+      wake.disabled = state === "blocked";
+      $("#wake-label").textContent = WAKE_LABELS[state] || WAKE_LABELS.off;
+
+      $("#chat-input").placeholder =
+        state === "capturing" ? "Listening…" : "Why doesn't that work?";
+      $("#chat-hint").textContent = HINTS[state] || HINTS.off;
     },
   });
 
+  /* A short blip on wake, built rather than fetched so it costs no asset and no
+   * request. Best-effort throughout: an AudioContext created without a user
+   * gesture starts suspended, and if the browser refuses to resume it the
+   * feature loses its chime and keeps its visual cue. Too short and too tonal to
+   * be transcribed as speech by the microphone that is about to open. */
+  let audio = null;
+  const blip = () => {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      audio.resume?.();
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.06, audio.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.12);
+      osc.connect(gain).connect(audio.destination);
+      osc.start();
+      osc.stop(audio.currentTime + 0.13);
+    } catch { /* no audio output; the visual cue carries it */ }
+  };
+
   if (dictation.supported) {
     mic.hidden = false;
+    wake.hidden = false;
+
+    // The microphone button is still the direct route: it takes a question now,
+    // wake phrase or not, which is what makes this survive a noisy room.
     mic.onclick = () => {
-      if (dictation.state !== "listening" && video && !video.paused) video.pause();
-      dictation.toggle();
+      if (dictation.state === "capturing") { dictation.finish(); return; }
+      if (video && !video.paused) video.pause();
+      dictation.capture();
     };
+
+    wake.onclick = () => {
+      const on = dictation.state === "armed" || dictation.state === "capturing"
+        || dictation.state === "suspended";
+      localStorage.setItem("astray.wake", on ? "off" : "on");
+      if (on) dictation.mute();
+      else dictation.arm();
+    };
+
     // Escape abandons the turn rather than sending it, which is the one thing a
     // student wants the moment they realise the room is too loud.
     $("#chat-input").addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && dictation.state === "listening") {
+      if (e.key === "Escape" && dictation.state === "capturing") {
         e.preventDefault();
         dictation.cancel();
         $("#chat-input").value = "";
@@ -402,13 +485,24 @@ function renderSession(sessionId) {
   }
 
   /* Chat opens on `diagnosis_ready`, not on the video. Waiting for the render
-   * would leave the student with nothing to do for three minutes. */
+   * would leave the student with nothing to do for three minutes.
+   *
+   * Idle listening starts here rather than at page load, and only if the
+   * microphone is already granted. Auto-arming into a permission prompt the
+   * student did not ask for is the behaviour that makes an always-on microphone
+   * feel like something done to them; when the answer is "prompt", the controls
+   * wait for a click, which is also the gesture the browser wants. */
   const enableChat = () => {
     $("#chat-input").disabled = false;
     $("#chat-form button[type=submit]").disabled = false;
     if (dictation.supported && dictation.state !== "blocked") mic.disabled = false;
     document.querySelectorAll(".suggestion").forEach((s) => (s.disabled = false));
-    $("#chat-hint").textContent = HINTS.idle;
+    $("#chat-hint").textContent = HINTS[dictation.state] || HINTS.off;
+    if (dictation.supported && wakeWanted()) {
+      dictation.permission().then((granted) => {
+        if (granted === "granted" && dictation.state === "off") dictation.arm();
+      });
+    }
   };
 
   const suggestions = $("#suggestions");
@@ -515,7 +609,7 @@ function renderSession(sessionId) {
     /* Enter during a turn sends what is in the box now. The turn has to be
      * abandoned rather than finished, or the recogniser's own commit sends the
      * same sentence a second time. */
-    if (dictation.state === "listening") dictation.cancel();
+    if (dictation.state === "capturing") dictation.cancel();
     input.value = "";
     ask(q);
   };
