@@ -29,7 +29,7 @@ from server.render.validator import validate  # noqa: E402
 
 SCENE = """
 import numpy as np
-from manim import FadeOut, MathTex, Scene
+from manim import FadeIn, FadeOut, MathTex, Scene
 
 from primitives.algebra_steps import compare_rules, step_sequence
 from primitives.area import area_totals, binomial_square, missing_area
@@ -42,9 +42,10 @@ from primitives.numberline import missing_roots
 class AstrayScene(Scene):
     def construct(self):
         with beat(self, "b1"):
+            # `title_card` and `math_lines` are the two helpers that build without
+            # animating, so the caller plays them. Everything below animates itself.
             card = title_card("Primitive check", "every helper, once")
-            self.play(FadeOut(card.copy().scale(0.01)), run_time=0.1)
-            self.add(card)
+            self.play(FadeIn(card))
             self.wait(0.5)
             self.play(FadeOut(card))
 

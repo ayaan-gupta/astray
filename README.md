@@ -69,6 +69,16 @@ budget is computed from measured duration, so that beat earns a three word line,
 which is exactly the disconnected-caption failure the narration work exists to
 prevent.
 
+Fixing that by asking for pacing overshot immediately, and the overshoot is the
+more interesting half. Told to reach the storyboard's estimated total, `s7` spent
+it entirely on waiting: `wait(30)`, `wait(35)`, `wait(40)`, `wait(35)`, a 155s video
+of four static frames. The estimate was the problem as much as the instruction,
+since `s6` had asked for 180s over four beats while its own prompt said 45 to 120.
+So the estimate is clamped to a realistic band, and `s7` is handed seconds *per
+beat* rather than a total, which is a length it can reason about instead of a budget
+it feels obliged to exhaust. A generous runtime does not buy more explanation; it
+buys a longer hold on the same picture.
+
 **The storyboard's vocabulary is backed by real builders.** `s6` picks a
 `primitive` per beat, and that choice is what the beat looks like. For a long time
 the enum offered `graph` and `balance` with nothing behind either, so a beat

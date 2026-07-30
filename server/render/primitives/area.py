@@ -32,7 +32,7 @@ from manim import (
     Text,
     VGroup,
 )
-from primitives.layout import SAFE_HEIGHT, SAFE_WIDTH, clear_frame, fit, safe_math
+from primitives.layout import SAFE_HEIGHT, SAFE_WIDTH, clear_frame, fit, prose, safe_math
 
 # The square is drawn `a`-major on purpose: with a and b too close in length the
 # four cells look like a 2x2 grid of equals, and the point is that a^2 dominates
@@ -182,7 +182,7 @@ def missing_area(
     `set_stroke` on the whole cell gave the `3y` labels a 5px yellow outline,
     turning the one number the beat exists to name into a blob.
     """
-    text = Text(caption, font_size=26, color=MIDDLE_COLOR)
+    text = Text(prose(caption), font_size=26, color=MIDDLE_COLOR)
     if text.width > SAFE_WIDTH:
         text.scale_to_fit_width(SAFE_WIDTH)
     text.to_edge(UP, buff=0.3)

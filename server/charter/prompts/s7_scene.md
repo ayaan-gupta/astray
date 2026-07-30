@@ -19,20 +19,22 @@ executes. Violating any rule below fails the render:
 4. Use `MathTex` for mathematics, never `Tex` -- `Tex` renders in LaTeX text mode
    where a bare `^` raises "Missing $ inserted" and kills the render. Do not wrap
    expressions in `$`; `MathTex` is already math mode.
-5. **Pace each beat individually, and pace it short.** `seconds_per_beat` below is
-   roughly how long one beat should last in total, animation included. The helpers
-   animate for one to four seconds on their own, so a beat usually needs a single
-   `self.wait(2)` or `self.wait(3)` after its content is on screen, and a little
-   more only where there are several lines to read.
+5. **Pace each beat to about `seconds_per_beat` seconds**, animation included. The
+   helpers animate for one to four seconds on their own, so most beats need two to
+   six seconds of waiting on top.
 
-   Never write a wait longer than 5. A held frame is a still image, and a viewer
-   reads one in about two seconds; past that the video looks broken. Do not try to
-   reach a total runtime by waiting longer, and do not divide a total budget among
-   the beats: a scene of four beats each holding a static frame for 35 seconds is a
-   worse animation than the same four beats in 40 seconds, not a longer one.
+   Reach that length by **showing more, not by holding longer**. A single unchanging
+   frame is a still image and a viewer reads one in about two seconds, so never
+   write one wait longer than 4. If a beat needs more time than that, give it more
+   to look at: reveal it in stages with a short wait after each, add a
+   `mark_divergence` to a graph, add a `caption`. Two `self.wait(3)` calls either
+   side of a second reveal are worth far more than one `self.wait(6)`.
 
-   Every beat is held open to a five second floor whatever you write, so a scene
-   with no waits at all still renders and stays citable.
+   Both failure modes here are real and equally bad. A scene with no waits at all
+   ran 12.5s across six beats, too short to seek to or narrate. A scene told to
+   reach a total spent it entirely on waiting -- 30, 35, 40, 35 -- and ran 155s as
+   four static frames. Every beat is held open to a five second floor whatever you
+   write, so shortness is survivable; a 35 second still is not.
 
 ## Reach for a primitive before writing your own
 

@@ -117,6 +117,21 @@ def label(value, font_size: int = 26, color=None):
     return Text(str(value), font_size=font_size, color=color)
 
 
+def prose(text: str) -> str:
+    r"""Clean a caller-supplied sentence for `Text`, which has no LaTeX at all.
+
+    `Text` typesets `$` literally, and a model writing a caption about mathematics
+    reaches for `$3y$` by habit however firmly the prompt says not to: a live render
+    captioned its area model *"The two $3y$ rectangles are missing!"*, dollar signs
+    and all. Stripping the delimiters keeps the maths readable as plain text, which
+    is what a one-line caption wants anyway.
+
+    `\(...\)` is handled too, being the other delimiter pair the model reaches for.
+    """
+    out = re.sub(r"\\[()\[\]]", "", text.replace("$", ""))
+    return re.sub(r"\s+", " ", out).strip()
+
+
 def legend(entries: list[tuple[str, object]]) -> VGroup:
     """A row of swatch-and-label pairs. `entries` is [(label, color), ...].
 
@@ -141,7 +156,7 @@ def caption(scene, text: str, run_time: float = 0.6):
     `Text`, not `MathTex`: a caption is a sentence. Callers wanting an expression
     on the bottom edge should compose `safe_math` themselves.
     """
-    line = Text(text, font_size=26)
+    line = Text(prose(text), font_size=26)
     if line.width > SAFE_WIDTH:
         line.scale_to_fit_width(SAFE_WIDTH)
     line.to_edge(DOWN, buff=0.28)

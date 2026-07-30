@@ -18,7 +18,11 @@ Rules, all enforced downstream:
   values -- an x window to plot over, the side lengths of a square, the solutions
   to mark -- name them here. The stage that writes the code has only this text to
   work from.
-- `total_estimated_seconds`: realistic total, typically 45-120.
+- `total_estimated_seconds`: about 8 to 12 seconds per beat. This is a diagram, not
+  a lecture: a beat is one thing being shown, and a viewer reads a static frame in
+  roughly two seconds. A generous estimate does not buy more explanation, it buys a
+  longer hold on the same picture, so it is clamped to a realistic band before the
+  scene is written.
 
 ## Choosing `primitive`
 

@@ -117,6 +117,17 @@ def compare_functions(
     return VGroup(axes, right, left)
 
 
+def _number(value: float) -> str:
+    """A value as a reader would write it: `16`, not `16.00`.
+
+    Two decimals on a whole number reads as a measurement rather than an answer,
+    and the values worth marking on these graphs are usually whole (16 against 10,
+    at y = 1).
+    """
+    rounded = round(value, 2)
+    return str(int(rounded)) if float(rounded).is_integer() else f"{rounded:.2f}"
+
+
 def mark_divergence(scene, axes, correct, wrong, x: float, run_time: float = 0.8):
     """At `x`, drop a vertical line and dot both curves with their values.
 
@@ -140,24 +151,40 @@ def mark_divergence(scene, axes, correct, wrong, x: float, run_time: float = 0.8
 
     rule = DashedLine(axes.c2p(x, lo), axes.c2p(x, hi), color=WHITE, stroke_width=2)
     right_dot = Dot(axes.c2p(x, y_right), color=GREEN, radius=0.08)
-    wrong_dot = Dot(axes.c2p(x, y_wrong), color=RED, radius=0.08)
 
-    right_text = safe_math(f"{y_right:.2f}", font_size=24, color=GREEN)
-    wrong_text = safe_math(f"{y_wrong:.2f}", font_size=24, color=RED)
-    # Pushed diagonally apart, not both placed to the right. The two curves are
-    # closest exactly where marking them is most interesting, and side-by-side
-    # labels overlapped each other and the dots: at x=1 on the chain-rule case the
-    # second value rendered as ".54" with its leading digit behind a dot.
-    above, below = (UP + RIGHT), (DOWN + RIGHT)
-    right_text.next_to(right_dot, above if y_right >= y_wrong else below, buff=0.1)
-    wrong_text.next_to(wrong_dot, below if y_right >= y_wrong else above, buff=0.1)
+    # At an intersection both curves have the same value, so two dots and two
+    # identical labels land on top of each other. Marking the crossing of `y = x^2`
+    # with `y = 16` printed "16.00" twice at each root, overlapping itself and the
+    # curve. One dot and one label is both cleaner and the truer statement: the
+    # point of an intersection is that there is one value, not two.
+    coincident = abs(y_right - y_wrong) < (hi - lo) * 0.02
+
+    right_text = safe_math(_number(y_right), font_size=24, color=GREEN)
+    parts = [rule, right_dot, right_text]
+
+    if coincident:
+        right_text.next_to(right_dot, UP + RIGHT, buff=0.1)
+    else:
+        wrong_dot = Dot(axes.c2p(x, y_wrong), color=RED, radius=0.08)
+        wrong_text = safe_math(_number(y_wrong), font_size=24, color=RED)
+        # Pushed diagonally apart, not both placed to the right. The two curves are
+        # closest exactly where marking them is most interesting, and side-by-side
+        # labels overlapped each other and the dots: at x=1 on the chain-rule case
+        # the second value rendered as ".54" with its leading digit behind a dot.
+        above, below = (UP + RIGHT), (DOWN + RIGHT)
+        right_text.next_to(right_dot, above if y_right >= y_wrong else below, buff=0.1)
+        wrong_text.next_to(wrong_dot, below if y_right >= y_wrong else above, buff=0.1)
+        parts += [wrong_dot, wrong_text]
+
     # Separating them is still not enough on its own: a value near zero lands on
     # the x-axis and its tick labels whatever direction it is pushed. A backing
     # panel is what makes the number readable wherever the maths happens to put it.
-    for text in (right_text, wrong_text):
-        text.add_background_rectangle(color=BLACK, opacity=0.8, buff=0.05)
+    for item in parts:
+        if isinstance(item, DashedLine | Dot):
+            continue
+        item.add_background_rectangle(color=BLACK, opacity=0.8, buff=0.05)
 
-    group = VGroup(rule, right_dot, wrong_dot, right_text, wrong_text)
+    group = VGroup(*parts)
     scene.play(Create(rule), run_time=run_time * 0.5)
-    scene.play(FadeIn(right_dot, wrong_dot, right_text, wrong_text), run_time=run_time * 0.5)
+    scene.play(FadeIn(*parts[1:]), run_time=run_time * 0.5)
     return group
