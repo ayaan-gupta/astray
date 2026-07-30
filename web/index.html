@@ -133,12 +133,30 @@
 
       <p class="err" id="submit-err" role="alert"></p>
     </div>
+
+    <!-- Every problem this browser has sent, newest first. Hidden until there is
+         one, so a first-time visitor is not shown an empty shelf. -->
+    <section class="card card-lit enter enter-3" id="past" aria-labelledby="h-past" hidden>
+      <div class="card-head">
+        <h2 class="card-title" id="h-past">Your problems</h2>
+        <p class="field-hint">Everything you have brought here. Pick one to watch it again or
+          keep asking about it.</p>
+      </div>
+      <div id="past-list" class="past-list"></div>
+    </section>
   </section>
 </template>
 
 <!-- --------------------------------------------------------------- SESSION -->
 <template id="tpl-session">
   <section class="pane">
+    <!-- What problem this session is about. It matters most when nobody typed it:
+         a problem created from speech was heard rather than written, so the
+         student has to be able to see what was heard. -->
+    <p class="problem-line" id="problem-line" hidden>
+      <span class="problem-label">Problem</span>
+      <span class="mono" id="problem-text"></span>
+    </p>
     <div id="diagnosis" class="card card-beam diagnosis is-pending enter enter-1">
       <span class="spinner" aria-hidden="true"></span>
       <p>Reading your working…</p>

@@ -549,15 +549,18 @@ async def test_prompt_carries_the_measured_duration_and_word_budget(tmp_path):
     repo.save_beat_timings(
         conn,
         sid,
-        [BeatTiming(id="b1", start=0.0, end=6.0), BeatTiming(id="b2", start=6.0, end=12.0)],
+        [BeatTiming(id="b1", start=0.0, end=16.0), BeatTiming(id="b2", start=16.0, end=32.0)],
     )
 
     # Two beats, so the assertions land on a mid-video beat: the last one gets the
-    # deliberately looser final-beat budget.
+    # deliberately looser final-beat budget. Sixteen seconds rather than six,
+    # because a six-second beat now sits under MIN_BEAT_WORDS and reports the floor
+    # instead of its measured budget -- which is the point of the floor, but it
+    # would leave this test asserting a constant.
     prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.5)
-    assert "6.0s on screen" in prompt
-    assert "hard maximum 14" in prompt
-    assert "aim for 11 words" in prompt, "a cap alone reads as a floor"
+    assert "16.0s on screen" in prompt
+    assert "hard maximum 39" in prompt
+    assert "aim for 31 words" in prompt, "a cap alone reads as a floor"
     assert "all squared" in prompt, "the phrase the whole misconception turns on"
     assert "em dash" in prompt
 
@@ -576,18 +579,25 @@ async def test_prompt_forbids_the_ambiguous_reading_of_a_bracketed_square(tmp_pa
 
 
 async def test_only_the_last_beat_gets_the_looser_budget(tmp_path):
+    """Beats long enough that MIN_BEAT_WORDS is not what is being measured.
+
+    At six seconds both budgets land on the floor and compare equal, which would
+    look like the final-beat allowance had been lost when it is simply not the
+    binding constraint there.
+    """
     conn = connect(tmp_path / "t.db")
     sid = _session(conn)
     repo.save_beats(conn, sid, _board())
     repo.save_beat_timings(
         conn,
         sid,
-        [BeatTiming(id="b1", start=0.0, end=6.0), BeatTiming(id="b2", start=6.0, end=12.0)],
+        [BeatTiming(id="b1", start=0.0, end=20.0), BeatTiming(id="b2", start=20.0, end=40.0)],
     )
     prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.0)
 
     budgets = [int(n) for n in re.findall(r"hard maximum (\d+)", prompt)]
     assert len(budgets) == 2
+    assert min(budgets) > narrate.MIN_BEAT_WORDS, "the floor must not be what is compared"
     assert budgets[1] > budgets[0], "identical durations, so only finality can differ"
 
 

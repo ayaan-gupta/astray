@@ -853,6 +853,27 @@ form > .btn { margin-top: 24px; }
   letter-spacing: -0.012em;
 }
 
+/* The solved steps, shown in place of a false rule when there was no attempt to
+   diagnose. Numbered because the order is the method: these are steps to follow,
+   not a list of facts. */
+.solution {
+  margin: 20px 0 0;
+  padding: 0;
+  padding-inline-start: 1.4em;
+  display: grid;
+  gap: 9px;
+}
+
+.solution li {
+  padding-inline-start: 4px;
+  color: var(--foreground-2);
+  font-size: clamp(13.5px, 1.6vw, 15px);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.solution li::marker { color: var(--muted-foreground); font-size: 12px; }
+
 .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
 
 .badge {
@@ -1243,6 +1264,83 @@ form > .btn { margin-top: 24px; }
   background: linear-gradient(90deg, var(--primary), oklch(0.780 0.129 29.2 / 0.42));
   border-radius: var(--radius-full);
 }
+
+/* ------------------------------------------------------- your past problems */
+/* Rows are anchors, not buttons: each one is a real destination with a real
+ * URL, so middle-click and "open in new tab" work, and a spoken problem that
+ * scrolled off is still somewhere the student can get back to. */
+.past-list { display: grid; gap: 3px; }
+
+.past-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 13px 14px;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+  transition-property: background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.past-row:hover { background: oklch(1 0 0 / 0.035); }
+
+.past-main { display: grid; gap: 4px; min-width: 0; }
+
+/* The problem is the identity of the row, so it is set in the mono face the
+ * student typed it in and truncated rather than wrapped -- a wrapped equation
+ * loses the shape you recognise it by. */
+.past-problem {
+  overflow: hidden;
+  color: var(--foreground-2);
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.past-sub { color: var(--muted-foreground); font-size: 12.5px; line-height: 1.45; }
+
+.past-topic {
+  padding: 4px 10px;
+  background: oklch(1 0 0 / 0.05);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.past-when {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (width <= 620px) {
+  /* The topic chip is the first thing to go: it is a nicety beside the problem
+     itself and the date, and three columns at this width truncates the problem
+     to nothing. */
+  .past-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .past-topic { display: none; }
+}
+
+/* ---------------------------------------------- the problem, on its session */
+/* Load-bearing for voice. A problem that was spoken was never typed anywhere the
+ * student can check, so this is the only place they can see what was heard. */
+.problem-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  margin: 0 0 14px;
+  padding-inline: 2px;
+}
+
+.problem-label { color: var(--muted-foreground); font-size: 12.5px; }
+.problem-line .mono { color: var(--foreground-2); font-size: 14px; }
 
 .empty { padding: 6px 0 4px; }
 .empty-title { margin: 0 0 6px; color: var(--foreground); font-size: 14.5px; font-weight: 570; }

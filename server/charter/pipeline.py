@@ -47,6 +47,44 @@ from server.store import repo
 logger = logging.getLogger(__name__)
 
 
+# What the downstream stages are told when the student showed no attempt.
+#
+# Every stage from s2 to s7 reads the diagnosis' `buggy_rule` and
+# `misconception_statement`, and a student who is simply stuck has neither. Left
+# alone, the stages fill the gap themselves: a live run on a spoken differential
+# equation with no working came back with a storyboard containing a beat titled
+# "Buggy Method", inventing a mistake the student never made and then arguing
+# against it. Fabricating an error is worse than not finding one -- it is this
+# product telling someone they think something they do not.
+#
+# So the framing is replaced rather than the pipeline forked. One substitution
+# here reaches every stage through the field it already reads, and each of them
+# keeps doing the job it does: sequence the concept, choose the maths, storyboard
+# it, write the scene.
+_NO_ATTEMPT_RULE = "(none: the student did not show an attempt)"
+_NO_ATTEMPT_BRIEF = (
+    "They are stuck on this problem and have not shown any working, so there is no mistake "
+    "to diagnose and nothing to contradict. Teach the method instead: show how this problem "
+    "is solved, step by step, and make clear why each step is the one to take. Do not invent "
+    "an error for them, and never suggest they got something wrong. "
+    # Observed on the first live explainer run: with no student working to anchor
+    # on, the storyboard filled the gap by adding an "Apply Initial Condition"
+    # beat to a problem that states no initial condition, and the narration then
+    # asserted x equals nought, y equals one as though it had been given. Inventing
+    # the question is the same failure as inventing the mistake.
+    "Use only what the problem actually states. If it gives no initial or boundary condition, "
+    "solve it in general and say so; never add a condition, a value, or a constraint that is "
+    "not in the problem."
+)
+
+
+def as_explainer(diagnosis: Diagnosis) -> Diagnosis:
+    """The same diagnosis, reframed as "teach this" rather than "correct this"."""
+    return diagnosis.model_copy(
+        update={"buggy_rule": _NO_ATTEMPT_RULE, "misconception_statement": _NO_ATTEMPT_BRIEF}
+    )
+
+
 class Pipeline:
     """Runs s2-s8 and the render for one already-diagnosed session."""
 
@@ -56,6 +94,10 @@ class Pipeline:
         self._conn = conn
         self._client = client
         self._settings = settings
+        # Set in `run`, read in `_render` for the narration prompt. An instance
+        # serves exactly one session -- it is constructed per stream -- so this is
+        # per-session state, not shared.
+        self._explaining = False
 
     async def run(
         self, session_id: str, submission: StudentSubmission, diagnosis: Diagnosis
@@ -63,6 +105,17 @@ class Pipeline:
         """Plan, generate, validate and render. Never raises."""
         fast = self._settings.deepseek_model_fast
         pro = self._settings.deepseek_model_reasoning
+
+        # No working shown means there is no wrong step to find, and asking for one
+        # is the wrong answer: a student who says "I kept getting stuck" wants to be
+        # shown how, and this pipeline can show them -- s1 has already produced a
+        # solved, SymPy-checked solution. The animation explains it instead of
+        # arguing with an attempt that does not exist.
+        explaining = not submission.steps
+        self._explaining = explaining
+        if explaining:
+            logger.info("session %s has no working; animating an explanation", session_id)
+            diagnosis = as_explainer(diagnosis)
 
         try:
             intent, meta = await self._stage(
@@ -108,7 +161,16 @@ class Pipeline:
             board, meta = await self._stage(
                 session_id,
                 StageName.VISUAL,
-                plan_beats(self._client, math=math, diagnosis=diagnosis, model=fast),
+                plan_beats(
+                    self._client,
+                    math=math,
+                    diagnosis=diagnosis,
+                    model=fast,
+                    # Nothing to target when there is no misconception. Enforcing it
+                    # here would fail the whole session over a contract that only
+                    # makes sense for a diagnosis.
+                    require_target=not explaining,
+                ),
             )
             # Persisted before the render so the beat rail can show the plan while
             # the video is still rendering -- untimed beats are a real UI state,
@@ -260,6 +322,7 @@ class Pipeline:
                     video_path=result.video_path,
                     settings=self._settings,
                     llm=self._client,
+                    explaining=self._explaining,
                 )
                 # No path to update: narration publishes to the render's own
                 # path, so what the session serves is already the narrated file.

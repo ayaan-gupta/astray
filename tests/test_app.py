@@ -88,6 +88,15 @@ _STAGE_REPLIES = {
         ),
         "beats_covered": ["b1", "b2", "b3"],
     },
+    # Not a pipeline stage: the voice router, which reaches the model the same way
+    # the planning stages do and so is answered here for the same reason.
+    "RoutedUtterance": {
+        "kind": "new_problem",
+        "problem": "dy/dx = (2x-5)/y^2",
+        "work": "",
+        "question": "",
+        "topic": "Differential equations",
+    },
 }
 
 
@@ -1392,3 +1401,168 @@ def test_typed_sessions_are_diagnosable_without_confirmation(photo_client):
         "/api/sessions", json={"handle": "p", "problem": "Expand (x+3)^2.", "work": "x^2+9"}
     ).json()["session_id"]
     assert photo_client.get(f"/api/sessions/{sid}/stream").status_code == 200
+
+
+# ------------------------------------------------- problem history and voice
+def test_a_students_problems_come_back_newest_first(client):
+    """The shelf a spoken problem can be found on again. A session created by
+    talking has no form submission behind it and no URL the student typed, so
+    without this list there is no route back to it."""
+    for problem in ("Expand (x+1)^2", "Expand (x+2)^2", "Expand (x+3)^2"):
+        client.post("/api/sessions", json={"handle": "h1", "problem": problem, "work": "w"})
+
+    body = client.get("/api/sessions", params={"handle": "h1"}).json()
+    assert [s["problem"] for s in body["sessions"]] == [
+        "Expand (x+3)^2",
+        "Expand (x+2)^2",
+        "Expand (x+1)^2",
+    ]
+    assert all(s["status"] == "created" for s in body["sessions"])
+
+
+def test_one_students_problems_are_not_anothers(client):
+    client.post("/api/sessions", json={"handle": "mine", "problem": "Expand (x+1)^2", "work": "w"})
+    client.post("/api/sessions", json={"handle": "yours", "problem": "Expand (x+2)^2", "work": "w"})
+
+    mine = client.get("/api/sessions", params={"handle": "mine"}).json()["sessions"]
+    assert [s["problem"] for s in mine] == ["Expand (x+1)^2"]
+
+
+def test_the_history_never_returns_the_handle_it_was_asked_for(client):
+    client.post("/api/sessions", json={"handle": "h2", "problem": "Expand (x+1)^2", "work": "w"})
+    body = client.get("/api/sessions", params={"handle": "h2"}).json()
+    assert "h2" not in json.dumps(body)
+
+
+def test_an_undiagnosed_problem_still_appears_in_the_history(client):
+    """A problem just spoken has to show up while it is still building, so the
+    misconception join is a LEFT one."""
+    client.post("/api/sessions", json={"handle": "h3", "problem": "Expand (x+1)^2", "work": "w"})
+    (row,) = client.get("/api/sessions", params={"handle": "h3"}).json()["sessions"]
+    assert row["misconception"] is None
+    assert row["status"] == "created"
+
+
+def test_a_spoken_problem_is_routed_away_from_the_conversation(client):
+    """The bug this endpoint exists for. Said mid-session, a differential equation
+    was answered as a question about expanding a bracket."""
+    sid = client.post(
+        "/api/sessions", json={"handle": "v", "problem": "Expand (y+3)^2", "work": "y^2+9"}
+    ).json()["session_id"]
+
+    body = client.post(
+        "/api/voice/route",
+        json={
+            "transcript": "I was solving DUI over DX = 2x - 5 over y squared and I gave up",
+            "session_id": sid,
+        },
+    ).json()
+    assert body["kind"] == "new_problem"
+    assert body["problem"] == "dy/dx = (2x-5)/y^2", "the notation is repaired, not passed through"
+
+
+def test_routing_without_a_session_is_allowed(client):
+    """The submit page has no conversation yet, and speaking there is still valid."""
+    r = client.post("/api/voice/route", json={"transcript": "expand x plus five all squared"})
+    assert r.status_code == 200
+    assert r.json()["kind"] == "new_problem"
+
+
+def test_routing_against_an_unknown_session_404s(client):
+    r = client.post(
+        "/api/voice/route", json={"transcript": "why is this wrong", "session_id": "nope"}
+    )
+    assert r.status_code == 404
+
+
+def test_an_empty_transcript_is_rejected_at_the_edge(client):
+    assert client.post("/api/voice/route", json={"transcript": ""}).status_code == 422
+
+
+def test_routing_is_billed_against_the_session_it_was_spoken_over(client):
+    """Voice routing is a metered model call like any other and belongs in the same
+    ledger, rather than being invisible spend."""
+    sid = client.post(
+        "/api/sessions", json={"handle": "v2", "problem": "Expand (y+3)^2", "work": "y^2+9"}
+    ).json()["session_id"]
+    client.post(
+        "/api/voice/route", json={"transcript": "a whole new problem here", "session_id": sid}
+    )
+
+    from server.store import repo as _repo
+    from server.store.db import connect as _connect
+
+    conn = _connect(client.app.state.settings.db_path)
+    stages = [row["stage"] for row in _repo.list_artifacts(conn, sid)]
+    assert "voice_route" in stages
+
+
+def test_speaking_a_reply_is_unavailable_rather_than_broken_without_a_voice(client):
+    """No FISH_API_KEY in tests. A 503 is the signal for "there is no audio", and
+    the client's fallback is the written reply already on screen."""
+    sid = client.post(
+        "/api/sessions", json={"handle": "s", "problem": "Expand (y+3)^2", "work": "y^2+9"}
+    ).json()["session_id"]
+    assert client.post(f"/api/sessions/{sid}/speak").status_code == 503
+
+
+def test_speaking_only_accepts_the_two_things_already_written_down(client):
+    """No arbitrary text: this is a metered third-party API behind an
+    unauthenticated endpoint, so a free-text body would be a billing hole."""
+    sid = client.post(
+        "/api/sessions", json={"handle": "s2", "problem": "Expand (y+3)^2", "work": "y^2+9"}
+    ).json()["session_id"]
+    r = client.post(f"/api/sessions/{sid}/speak", params={"source": "anything-i-like"})
+    assert r.status_code == 422
+
+
+def test_speaking_an_unknown_session_404s(client):
+    assert client.post("/api/sessions/nope/speak").status_code == 404
+
+
+def test_speaking_accepts_the_solution_for_a_session_with_no_working(client):
+    """A session with nothing attempted must not announce its own diagnosis: that
+    text is an apology for finding no mistake, and it would be read out over an
+    animation that is explaining the method."""
+    sid = client.post(
+        "/api/sessions", json={"handle": "s3", "problem": "dy/dx = (2x-5)/y^2", "work": ""}
+    ).json()["session_id"]
+    # 503 rather than 422: the source is accepted, there is simply no voice configured.
+    assert (
+        client.post(f"/api/sessions/{sid}/speak", params={"source": "solution"}).status_code == 503
+    )
+
+
+def test_a_session_with_no_working_is_marked_as_explaining(client):
+    """Steps are the premise of this product, not a requirement of it. A student who
+    says they are stuck gets the method, not a demand for working they do not have."""
+    sid = client.post(
+        "/api/sessions", json={"handle": "e", "problem": "dy/dx = (2x-5)/y^2", "work": ""}
+    ).json()["session_id"]
+    body = client.get(f"/api/sessions/{sid}").json()
+    assert body["explaining"] is True
+
+
+def test_a_session_with_working_is_not_marked_as_explaining(client):
+    sid = client.post(
+        "/api/sessions", json={"handle": "e2", "problem": "Expand (y+3)^2", "work": "y^2+9"}
+    ).json()["session_id"]
+    assert client.get(f"/api/sessions/{sid}").json()["explaining"] is False
+
+
+def test_the_history_tells_an_explainer_apart_from_correct_working(client):
+    """Both finish at `ready` with no misconception. Telling a student who never
+    showed their working that their working was correct is a different claim."""
+    stuck = client.post(
+        "/api/sessions", json={"handle": "hx", "problem": "dy/dx = (2x-5)/y^2", "work": ""}
+    ).json()["session_id"]
+    tried = client.post(
+        "/api/sessions", json={"handle": "hx", "problem": "Expand (y+3)^2", "work": "y^2+9"}
+    ).json()["session_id"]
+
+    rows = {
+        s["session_id"]: s
+        for s in client.get("/api/sessions", params={"handle": "hx"}).json()["sessions"]
+    }
+    assert rows[stuck]["explaining"] is True
+    assert rows[tried]["explaining"] is False

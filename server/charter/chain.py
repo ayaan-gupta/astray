@@ -190,7 +190,15 @@ class Chain:
 
         misconception_id: int | None
         taxonomy_meta: LlmCallMeta | None
-        if diagnosis.no_error_found:
+        # No working means no misconception, for exactly the reason correct working
+        # means none. Resolving it anyway minted taxonomy row `no-work-provided-error`
+        # whose canonical statement was s1's apology for finding no mistake -- and
+        # then that row was counted: it appeared in the student's own problem list as
+        # the diagnosis, and in `/api/insights` beside real misconceptions with a
+        # student count. Every later no-working session, in any topic, would have
+        # collapsed onto it through the exact-canonical fast path.
+        nothing_to_resolve = diagnosis.no_error_found or not submission.steps
+        if nothing_to_resolve:
             # Correct work is not a misconception, so it must not be resolved
             # against the taxonomy at all. Doing so minted a row from the prose
             # in `buggy_rule` and then, via the exact-canonical fast path,
@@ -224,15 +232,23 @@ class Chain:
             diagnosis=diagnosis,
             misconception_id=misconception_id,
             # No rule was diagnosed, so there is nothing to canonicalize --
-            # canonicalizing the "none" placeholder would write a junk
+            # canonicalizing the "none" or "unknown" placeholder would write a junk
             # canonical_rule that later queries could group on.
             canonical_rule=(
-                "" if diagnosis.no_error_found else taxonomy.canonicalize_rule(diagnosis.buggy_rule)
+                "" if nothing_to_resolve else taxonomy.canonicalize_rule(diagnosis.buggy_rule)
             ),
         )
 
         if diagnosis.no_error_found:
             status = "correct"
+        elif not submission.steps:
+            # A student who showed no working is not being unclear, they are asking
+            # to be shown how. s1 reports `is_unclear` here -- correctly, since it
+            # cannot name a mistake -- but calling that "needs clarification" asks
+            # them for something they already said they do not have, and the
+            # animation pipeline can serve them anyway: it explains the method
+            # instead of contradicting an attempt. See `pipeline.as_explainer`.
+            status = "explaining"
         elif diagnosis.is_unclear:
             status = "needs_clarification"
         else:

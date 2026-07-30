@@ -37,8 +37,14 @@ class StoryboardInvalid(LlmError):
     """The storyboard violated the beat contract the whole pipeline depends on."""
 
 
-def check_storyboard(storyboard: Storyboard) -> None:
-    """Raise StoryboardInvalid unless the beat contract holds."""
+def check_storyboard(storyboard: Storyboard, *, require_target: bool = True) -> None:
+    """Raise StoryboardInvalid unless the beat contract holds.
+
+    `require_target` is False for a session with no working shown, where the
+    animation teaches the method rather than contradicting an attempt. There is no
+    misconception to target, so requiring a beat that targets one would fail the
+    whole session over a contract that only applies to a diagnosis.
+    """
     beats = storyboard.beats
     if not MIN_BEATS <= len(beats) <= MAX_BEATS:
         raise StoryboardInvalid(
@@ -48,7 +54,7 @@ def check_storyboard(storyboard: Storyboard) -> None:
     actual = [b.id for b in beats]
     if actual != expected:
         raise StoryboardInvalid(f"beat ids must be {expected}, got {actual}")
-    if not any(b.targets_misconception for b in beats):
+    if require_target and not any(b.targets_misconception for b in beats):
         # Without this beat the animation explains the topic but never contradicts
         # the student's rule, which is the one thing it exists to do.
         raise StoryboardInvalid("no beat has targets_misconception=true")
@@ -71,7 +77,12 @@ def clamp_runtime(storyboard: Storyboard) -> Storyboard:
 
 
 async def plan_beats(
-    client: DeepSeekClient, *, math: MathContent, diagnosis: Diagnosis, model: str
+    client: DeepSeekClient,
+    *,
+    math: MathContent,
+    diagnosis: Diagnosis,
+    model: str,
+    require_target: bool = True,
 ) -> tuple[Storyboard, LlmCallMeta]:
     storyboard, meta = await call_stage(
         client,
@@ -85,5 +96,5 @@ async def plan_beats(
         key_identity=math.key_identity,
         concrete_numbers="; ".join(math.concrete_numbers),
     )
-    check_storyboard(storyboard)
+    check_storyboard(storyboard, require_target=require_target)
     return clamp_runtime(storyboard), meta

@@ -27,6 +27,32 @@ def get_session(conn: sqlite3.Connection, session_id: str) -> sqlite3.Row | None
     return conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
 
 
+def list_sessions(conn: sqlite3.Connection, handle: str, limit: int = 50) -> list[sqlite3.Row]:
+    """One student's problems, newest first, with what each turned out to be.
+
+    Rows rather than counts, unlike everything in `insights`: this is the student's
+    own list of their own work, so it is the one place a session id is the point.
+    The misconception joins in because a list of bare problem statements gives no
+    reason to click any particular one, and it is LEFT so that a session still
+    diagnosing, or one whose working was correct, still appears -- a student who
+    just spoke a problem must see it in their history while it is still building.
+    """
+    return conn.execute(
+        """SELECT s.id, s.problem, s.status, s.created_at, s.input_mode,
+                  s.student_work_json,
+                  m.slug AS misconception_slug, m.canonical_statement AS misconception,
+                  m.topic AS topic
+             FROM sessions s
+             LEFT JOIN diagnoses d       ON d.session_id = s.id
+             LEFT JOIN misconceptions m  ON m.id = d.misconception_id
+            WHERE s.handle = ?
+            GROUP BY s.id
+            ORDER BY s.created_at DESC, s.rowid DESC
+            LIMIT ?""",
+        (handle, limit),
+    ).fetchall()
+
+
 def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -> None:
     conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
 

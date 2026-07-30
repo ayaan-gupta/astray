@@ -76,7 +76,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -84,8 +84,10 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from server.audio import speech
+from server.audio.fish import FishAudioClient, SpeechError
 from server.charter.chain import Chain, ProgressEvent
-from server.charter.contracts import Diagnosis, StageName, StudentSubmission
+from server.charter.contracts import Diagnosis, LlmCallMeta, StageName, StudentSubmission
 from server.charter.pipeline import Pipeline
 from server.charter.stages.s0_ingest import ingest_photo, ingest_typed, needs_review
 from server.config import Settings, get_settings
@@ -95,7 +97,7 @@ from server.llm.vision import NullVision, VisionProvider, VisionUnavailable
 from server.store import insights, repo
 from server.store.db import connect
 from server.store.seed_taxonomy import seed
-from server.tutor import chat
+from server.tutor import chat, route, say
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +259,19 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_CHAT_CHARS)
 
 
+# Voice routing and spoken replies are product surfaces, not pipeline stages, so
+# like chat they get plain string labels in the same cost ledger.
+_ROUTE_STAGE = "voice_route"
+_SPEAK_STAGE = "speak"
+
+
+class VoiceRouteRequest(BaseModel):
+    """One spoken utterance, plus the session it was spoken over, if any."""
+
+    transcript: str = Field(min_length=1, max_length=route.MAX_TRANSCRIPT_CHARS)
+    session_id: str | None = Field(default=None, max_length=64)
+
+
 class ConfirmSubmissionRequest(BaseModel):
     """The student's reviewed version of their work, as edited in the UI.
 
@@ -274,6 +289,46 @@ class ConfirmSubmissionRequest(BaseModel):
         if not value.strip():
             raise ValueError("problem must not be blank")
         return value
+
+
+# Read aloud in front of the two things that are announced rather than asked for,
+# so the audio opens as speech rather than as a sentence fragment. Fixed literals
+# in this codebase, never model-derived.
+_DIAGNOSIS_PREFACE = "Here's what I think went wrong."
+_SOLUTION_PREFACE = "Here's how this one works."
+
+_SPEAKABLE_SOURCES = ("reply", "diagnosis", "solution")
+
+
+def _steps_of(student_work_json: str) -> list:
+    """The submission's steps, tolerant of a row that predates the current shape."""
+    try:
+        return json.loads(student_work_json or "{}").get("steps") or []
+    except (TypeError, ValueError):
+        return []
+
+
+def _written_for_speech(connection, session_id: str, source: str) -> str:
+    """The stored text a `speak` request is asking for, or "" if there is none."""
+    if source == "diagnosis":
+        row = repo.get_diagnosis(connection, session_id)
+        statement = (row["statement"] or "").strip() if row is not None else ""
+        return f"{_DIAGNOSIS_PREFACE} {statement}" if statement else ""
+
+    if source == "solution":
+        # For a session with no working shown. Reading the diagnosis aloud here
+        # would announce "I can't identify a specific mistake because you didn't
+        # show any steps" over an animation that is explaining the method -- the
+        # apology for not finding a mistake, spoken instead of the answer.
+        row = repo.get_diagnosis(connection, session_id)
+        if row is None:
+            return ""
+        steps = json.loads(row["payload_json"]).get("correct_solution", [])
+        joined = ". ".join(step.strip().rstrip(".") for step in steps if step.strip())
+        return f"{_SOLUTION_PREFACE} {joined}." if joined else ""
+
+    replies = [r for r in repo.list_chat(connection, session_id) if r["role"] == "assistant"]
+    return replies[-1]["content"] if replies else ""
 
 
 def create_app(
@@ -360,6 +415,37 @@ def create_app(
             conn_of(request), handle=body.handle, submission=submission
         )
         return {"session_id": session_id, "status": "created"}
+
+    @app.get("/api/sessions")
+    def list_sessions(request: Request, handle: str, limit: int = 50) -> dict:
+        """One student's own problems, newest first.
+
+        The only route that returns session ids for more than one session, and it
+        is scoped to a single handle for that reason. A handle is a browser-local
+        anonymous id, so this is "my own work" rather than a directory: nothing
+        here crosses between students, and the response never contains the handle
+        it was asked for.
+        """
+        rows = repo.list_sessions(conn_of(request), handle, limit=max(1, min(limit, 200)))
+        return {
+            "sessions": [
+                {
+                    "session_id": row["id"],
+                    "problem": row["problem"],
+                    "status": row["status"],
+                    "created_at": row["created_at"],
+                    "input_mode": row["input_mode"],
+                    "misconception": row["misconception"],
+                    "topic": row["topic"],
+                    # Both a finished explainer and finished correct working end at
+                    # `ready` with no misconception, and the row has to tell them
+                    # apart: labelling "I never showed my working" as "correct
+                    # working, nothing to fix" is a different claim entirely.
+                    "explaining": not _steps_of(row["student_work_json"]),
+                }
+                for row in rows
+            ]
+        }
 
     @app.post("/api/sessions/{session_id}/photo")
     async def upload_photo(
@@ -474,6 +560,11 @@ def create_app(
             "status": row["status"],
             "problem": row["problem"],
             "submission": json.loads(row["student_work_json"]),
+            # No working shown, so there is no wrong step and the animation teaches
+            # the method instead. The client needs this to know which card to show:
+            # a student who never claimed anything must not be shown a card headed
+            # "here's where it went astray".
+            "explaining": not _steps_of(row["student_work_json"]),
             "diagnosis": diagnosis,
         }
 
@@ -755,6 +846,106 @@ def create_app(
                 for row in repo.list_chat(connection, session_id)
             ]
         }
+
+    @app.post("/api/voice/route")
+    async def route_voice(body: VoiceRouteRequest, request: Request) -> dict:
+        """Decide whether a spoken sentence is a new problem or a follow-up.
+
+        Deliberately does not act on its own answer. A `new_problem` comes back as
+        cleaned fields for the client to POST to `/api/sessions` like any other
+        submission, which keeps session creation on one tested path and leaves the
+        student's own words visible in the form rather than committing them to a
+        three-minute render sight unseen.
+        """
+        connection = conn_of(request)
+        problem, misconception = "", ""
+        if body.session_id:
+            session = repo.get_session(connection, body.session_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="session not found")
+            problem = session["problem"]
+            diagnosis = repo.get_diagnosis(connection, body.session_id)
+            if diagnosis is not None:
+                misconception = diagnosis["statement"]
+
+        routed, meta = await route.route(
+            request.app.state.client,
+            transcript=body.transcript,
+            model=request.app.state.settings.deepseek_model_fast,
+            current_problem=problem,
+            current_misconception=misconception,
+        )
+        if meta is not None and body.session_id:
+            repo.record_artifact(
+                connection,
+                session_id=body.session_id,
+                stage=_ROUTE_STAGE,
+                payload={"kind": routed.kind},
+                meta=meta,
+            )
+        return routed.model_dump()
+
+    @app.post("/api/sessions/{session_id}/speak")
+    async def speak_reply(session_id: str, request: Request, source: str = "reply") -> Response:
+        """Say something this session has already written, out loud.
+
+        Takes no text, only a choice between things already stored: the most recent
+        tutor reply, the diagnosis, or the solved steps. The alternative -- a body of arbitrary
+        text to synthesise -- is a metered third-party API behind an
+        unauthenticated endpoint, so it would be a billing hole with a microphone
+        attached. Reading from storage means the only thing this can ever be made
+        to say is something this product already said in writing.
+        """
+        connection = conn_of(request)
+        if repo.get_session(connection, session_id) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if source not in _SPEAKABLE_SOURCES:
+            raise HTTPException(
+                status_code=422, detail=f"source must be one of {', '.join(_SPEAKABLE_SOURCES)}"
+            )
+
+        settings = request.app.state.settings
+        if not settings.narration_available:
+            # Not an error: the caller's fallback is the text reply it already has
+            # on screen, so this is "there is no audio", not "something broke".
+            raise HTTPException(status_code=503, detail="speech is not configured")
+
+        written = _written_for_speech(connection, session_id, source)
+        if not written:
+            raise HTTPException(status_code=404, detail="nothing to say yet")
+
+        spoken = say.for_speech(written, say.beat_titles(connection, session_id))
+        if not spoken:
+            raise HTTPException(status_code=404, detail="nothing speakable there")
+
+        client = FishAudioClient(
+            settings.fish_api_key or "",
+            base_url=settings.fish_base_url,
+            model=settings.fish_model,
+            voice_id=settings.fish_voice_id,
+            speed=settings.narration_speed,
+            timeout_s=settings.narration_timeout_s,
+        )
+        try:
+            clip = await client.synthesize(speech.with_letter_phonemes(spoken))
+        except SpeechError as exc:
+            logger.warning("speaking a reply failed for %s: %s", session_id, exc)
+            raise HTTPException(
+                status_code=503, detail="speech is temporarily unavailable"
+            ) from exc
+        finally:
+            await client.aclose()
+
+        # Fish bills per character, so a spoken reply is real spend and belongs in
+        # the same ledger the model calls use. Counts and cost only, never the text.
+        repo.record_artifact(
+            connection,
+            session_id=session_id,
+            stage=_SPEAK_STAGE,
+            payload={"characters": clip.characters},
+            meta=LlmCallMeta(model=settings.fish_model, cost_usd=clip.cost_usd, ms=clip.ms),
+        )
+        return Response(content=clip.audio, media_type="audio/mpeg")
 
     @app.get("/api/sessions/{session_id}/peers")
     def get_peers(session_id: str, request: Request) -> dict:

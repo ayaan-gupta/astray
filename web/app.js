@@ -221,7 +221,92 @@ function renderSubmit() {
       } catch (e2) { err.textContent = e2.message; }
     };
   }
+
+  showPastProblems();
 }
+
+/* The student's own shelf of past work.
+ *
+ * Additive, like insights: a failure here leaves the card hidden rather than
+ * blocking the form that is the point of this page. The card starts `hidden` in
+ * the template and is only revealed once there is something in it, so a
+ * first-time visitor never sees an empty shelf asking to be filled.
+ *
+ * Voice is the reason this is on the front page rather than tucked into
+ * insights. A problem created by speaking has no form submission behind it and
+ * no URL the student typed, so without a list there is no route back to it. */
+async function showPastProblems() {
+  const card = $("#past");
+  if (!card) return;
+  let sessions = [];
+  try {
+    ({ sessions } = await api(`/api/sessions?handle=${encodeURIComponent(handle)}`));
+  } catch { return; }
+  if (!sessions.length) return;
+
+  $("#past-list").replaceChildren(...sessions.map((s) => {
+    const row = el("a", "past-row");
+    row.href = `#/session/${s.session_id}`;
+
+    const main = el("span", "past-main");
+    main.append(el("span", "past-problem mono", s.problem));
+    // What it turned out to be, which is the reason to click one row over
+    // another. A session still running has no diagnosis yet, and one whose
+    // working was correct never gets a misconception, so both fall back to a
+    // state -- shown as a state, not as an error.
+    main.append(el("span", "past-sub", subtitleFor(s)));
+    row.append(main);
+
+    if (s.topic) row.append(el("span", "past-topic", prettyTopic(s.topic)));
+    row.append(el("time", "past-when", relativeDay(s.created_at)));
+    return row;
+  }));
+  card.hidden = false;
+}
+
+/* The taxonomy's topics are machine keys: `algebra.binomial_expansion`. They are
+ * built to be counted and joined on, so they are shown here as the last segment
+ * in words rather than renamed at the source, where a display label would have to
+ * stay stable across every row that already references the key. */
+const prettyTopic = (topic) => {
+  const leaf = String(topic).split(".").pop().replace(/[_-]+/g, " ").trim();
+  return leaf ? leaf[0].toUpperCase() + leaf.slice(1) : "";
+};
+
+/* What a row says when there is no misconception to name.
+ *
+ * `ready` is the ambiguous one, and the reason this is a function rather than a
+ * lookup: a finished explainer and finished correct working both end at `ready`
+ * with no misconception, and telling a student who never showed their working
+ * that their working was correct is a different claim entirely. */
+const subtitleFor = (s) => {
+  if (s.misconception) return s.misconception;
+  if (s.explaining) return PAST_STATUS.explaining;
+  return PAST_STATUS[s.status] || s.status;
+};
+
+const PAST_STATUS = {
+  created: "Not started yet",
+  in_progress: "Still working on this one",
+  ready: "Correct working, nothing to fix",
+  explaining: "Explained, no working to correct",
+  needs_clarification: "Needs your working to go further",
+  animation_failed: "Diagnosed, but the animation didn't build",
+  failed: "This one did not finish",
+};
+
+/* SQLite writes `datetime('now')`, which is UTC with no zone marker, so it has
+ * to be told it is UTC or every timestamp reads as local and "just now" comes
+ * out hours in the future. */
+const relativeDay = (stamp) => {
+  const then = new Date(`${String(stamp).replace(" ", "T")}Z`);
+  if (Number.isNaN(then.getTime())) return "";
+  const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
 
 /* ------------------------------------------------------------------ session */
 const STAGES = [
@@ -355,10 +440,55 @@ function renderSession(sessionId) {
      * `playing` rather than `play`, because `play` fires before audio is actually
      * coming out and the gap is enough for the first words to be heard. */
     video.addEventListener("playing", () => dictation.suspend());
-    video.addEventListener("pause", () => dictation.resume());
-    video.addEventListener("ended", () => dictation.resume());
+    video.addEventListener("pause", releaseMic);
+    video.addEventListener("ended", releaseMic);
 
     drawRail();
+  };
+
+  /* Two different things now hold the microphone closed: the animation's
+   * narration, and the tutor's spoken reply. `suspended` inside voice.js is a
+   * flag rather than a counter, so whichever of the two finished first would
+   * reopen the microphone while the other was still talking -- straight into the
+   * feedback loop the cooldown exists to prevent. Releasing therefore asks
+   * whether anything is still audible, instead of assuming this was the only
+   * reason the microphone was closed. */
+  let replyAudio = null;
+  const talking = () =>
+    (video && !video.paused && !video.ended) || (replyAudio && !replyAudio.paused);
+  const releaseMic = () => { if (!talking()) dictation.resume(); };
+
+  /* Say the last reply out loud.
+   *
+   * Additive throughout: no text is sent up (the endpoint speaks the reply it
+   * already stored, so it cannot be made to say anything else), and every failure
+   * path leaves the written reply on screen, which was always the real answer.
+   * A 503 here is the ordinary case when no voice is configured, so it is not
+   * reported as an error.
+   *
+   * The microphone is closed *before* play rather than on the `playing` event.
+   * For the video that ordering is a nicety; here the audio is a voice answering
+   * a question about the student's mistake, in the same words they would use to
+   * ask the next one, so a single frame of it reaching an open microphone is a
+   * question the student did not ask. */
+  const speakReply = async (source = "reply") => {
+    let url = null;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/speak?source=${source}`,
+        { method: "POST" });
+      if (!res.ok) return;
+      url = URL.createObjectURL(await res.blob());
+      replyAudio?.pause();
+      replyAudio = new Audio(url);
+      const done = () => { releaseMic(); URL.revokeObjectURL(url); };
+      replyAudio.addEventListener("ended", done);
+      replyAudio.addEventListener("error", done);
+      dictation.suspend();
+      await replyAudio.play();
+    } catch {
+      if (url) URL.revokeObjectURL(url);
+      releaseMic();
+    }
   };
 
   /* Voice input, wired to the composer.
@@ -401,13 +531,19 @@ function renderSession(sessionId) {
 
   const dictation = window.createDictation({
     onInterim: (text) => { $("#chat-input").value = text; },
-    onFinal: (text) => { $("#chat-input").value = ""; ask(text); },
+    onFinal: (text) => { $("#chat-input").value = ""; utterance(text); },
     /* The wake phrase landed. The video is paused defensively -- playback
      * suspends listening, so in the ordinary case nothing is playing by the time
      * we get here -- and a short blip confirms the phrase was heard, because
-     * without it the student cannot tell whether to start talking. */
+     * without it the student cannot tell whether to start talking.
+     *
+     * A spoken reply is stopped rather than left to finish. Saying the wake
+     * phrase over the tutor is an interruption, and every other voice assistant
+     * treats it as one; talking through the student's second question would also
+     * be talking into an open microphone. */
     onWake: () => {
       if (video && !video.paused) video.pause();
+      replyAudio?.pause();
       blip();
     },
     onState: (state) => {
@@ -587,7 +723,7 @@ function renderSession(sessionId) {
     $("#messages").scrollTop = $("#messages").scrollHeight;
   };
 
-  const ask = async (question) => {
+  const ask = async (question, { spoken = false } = {}) => {
     const q = question.trim();
     if (!q || $("#chat-input").disabled) return;
     addMessage("user", q);
@@ -597,8 +733,78 @@ function renderSession(sessionId) {
         body: JSON.stringify({ message: q }),
       });
       addMessage("assistant", res.reply);
+      // Answered aloud only when it was asked aloud. A student who typed is
+      // reading, and reading is faster than listening.
+      if (spoken) speakReply();
     } catch (e2) {
       addMessage("assistant", `Unable to answer right now: ${e2.message}. Try again in a moment.`);
+    }
+  };
+
+  /* Everything spoken goes through here, and this is where "hey Astray" stopped
+   * meaning "ask a question about this animation".
+   *
+   * A student mid-session says two quite different kinds of thing. "I still don't
+   * get the binomial thing" belongs in this conversation. "I was solving dy/dx
+   * equals 2x minus 5 over y squared and I couldn't figure it out" is a different
+   * problem, and answering it in this chat was the failure: the reply arrived
+   * grounded in an animation about expanding a bracket, and no animation was ever
+   * built for the question actually asked.
+   *
+   * The server decides which, because deciding needs the maths read properly and
+   * the recogniser does not deliver maths -- it delivered "DUI over DX" for
+   * dy/dx. The same call that classifies also repairs the notation, so a new
+   * problem arrives as `dy/dx = (2x-5)/y^2` rather than as a sentence about DUI.
+   *
+   * The hint line carries the wait. Routing costs a couple of seconds, and a
+   * student who has just finished talking to an interface that has gone silent
+   * assumes it did not hear them. */
+  const utterance = async (text) => {
+    const said = text.trim();
+    if (!said) return;
+    const hint = $("#chat-hint");
+    hint.textContent = "Working out what you're asking…";
+    let routed;
+    try {
+      routed = await api("/api/voice/route", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ transcript: said, session_id: sessionId }),
+      });
+    } catch {
+      // Routing is a convenience over "send it to the tutor". Losing it must not
+      // lose the sentence the student just said.
+      routed = { kind: "followup", question: said };
+    }
+    hint.textContent = HINTS[dictation.state] || HINTS.off;
+
+    if (routed.kind === "new_problem" && routed.problem) {
+      await startProblem(routed);
+      return;
+    }
+    ask(routed.question || said, { spoken: true });
+  };
+
+  /* A new problem, spoken. Creating the session and changing the hash is all it
+   * takes to start the pipeline: the session view opens the stream, and opening
+   * the stream is what runs the chain. So this is the same path the typed form
+   * takes, reached by talking.
+   *
+   * `astray.spoke` survives the navigation. The new session's own chat should
+   * answer aloud too, because the student asked for this one out loud and has not
+   * touched the keyboard. */
+  const startProblem = async (routed) => {
+    addMessage("user", routed.problem);
+    addMessage("assistant", `That's a different problem, so I'm building you a new animation for `
+      + `it. One moment.`);
+    try {
+      const { session_id } = await api("/api/sessions", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ handle, problem: routed.problem, work: routed.work || "" }),
+      });
+      sessionStorage.setItem("astray.spoke", session_id);
+      location.hash = `#/session/${session_id}`;
+    } catch (e2) {
+      addMessage("assistant", `I heard a new problem but couldn't start it: ${e2.message}.`);
     }
   };
 
@@ -614,15 +820,56 @@ function renderSession(sessionId) {
     ask(q);
   };
 
+  /* A session created by speaking answers its first question out loud without
+   * being asked to. The student spoke a problem into a machine and has not
+   * touched the keyboard, so a silent diagnosis is the same "it did not respond
+   * at all" that the written reply already looked like. Read from sessionStorage,
+   * because this session was navigated to, not asked for in place. Announced at
+   * most once: showDiagnosis runs both for the live event and for a reload of a
+   * finished session. */
+  const spokeThisIn = sessionStorage.getItem("astray.spoke") === sessionId;
+  sessionStorage.removeItem("astray.spoke");
+  let announced = false;
+
+  /* Whether this session has any working to diagnose, learned from the session
+   * fetch below. That fetch resolves in milliseconds and the diagnosis takes 15 to
+   * 30 seconds, so it is always known by the time the card is drawn; on a reload of
+   * a finished session both arrive from the same request, in order. */
+  let explaining = false;
+
   const showDiagnosis = async (d) => {
     const card = $("#diagnosis");
     card.classList.remove("is-pending");
     card.replaceChildren();
+    // A session with no working has no mistake to announce, and its diagnosis text
+    // is an apology for not finding one. Speak the method instead.
+    if (spokeThisIn && !announced) {
+      announced = true;
+      speakReply(explaining ? "solution" : "diagnosis");
+    }
 
     if (d.no_error_found) {
       card.append(el("p", "eyebrow", "Diagnosis"));
       card.append(el("h1", null, "Your working is correct"));
       card.append(el("p", null, d.misconception_statement));
+      return;
+    }
+
+    /* Nothing was attempted, so there is nothing to diagnose. The card that says
+     * "here's where it went astray" would be accusing them of a mistake they never
+     * made, and the statement the diagnosis carries here is an apology for not
+     * finding one. What it does carry is a solved, SymPy-checked solution, so that
+     * is what gets shown, and the animation teaches the method. */
+    if (explaining) {
+      card.append(el("p", "eyebrow", "How to solve it"));
+      card.append(el("h1", null, "Here's how this one works."));
+      const steps = el("ol", "solution");
+      (d.correct_solution || []).forEach((s) => steps.append(el("li", "mono", s)));
+      if (steps.childElementCount) card.append(steps);
+      const badges = el("div", "badges");
+      if (d.verified_by_sympy) badges.append(el("span", "badge is-good", "✓ checked with SymPy"));
+      badges.append(el("span", "badge", "no working shown, so nothing to correct"));
+      card.append(badges);
       return;
     }
 
@@ -661,6 +908,11 @@ function renderSession(sessionId) {
       api(`/api/sessions/${sessionId}`),
       api(`/api/sessions/${sessionId}/beats`).catch(() => ({ beats: [], video_url: null })),
     ]);
+    explaining = Boolean(session.explaining);
+    if (session.problem) {
+      $("#problem-text").textContent = session.problem;
+      $("#problem-line").hidden = false;
+    }
     if (session.diagnosis) { showDiagnosis(session.diagnosis); enableChat(); }
     beats = info.beats;
     drawRail();

@@ -46,6 +46,19 @@ _TIMINGS: list[dict] = []
 # to seek to.
 MIN_BEAT_S = 5.0
 
+# How long the previous beat's contents take to fade at the start of a new one.
+# Long enough to read as a transition rather than a dropped frame, short enough
+# not to eat the beat it opens.
+#
+# The primitives already do this before they draw (`layout.clear_frame`), for the
+# same reason and after the same failure: a live render left a title card up and
+# drew the comparison over it. But that only covers beats built out of
+# primitives, and a beat where the model positions its own mobjects gets no such
+# guarantee -- it cuts from a full frame to a fuller one, with the previous
+# section's contents still sitting underneath. Owning it here makes every beat
+# boundary a transition, whoever wrote the beat.
+TRANSITION_S = 0.35
+
 
 def _scene_time(scene) -> float:
     """Elapsed animation time, from the renderer clock.
@@ -87,9 +100,11 @@ def beat(scene, beat_id: str):
     `with beat(...)` block, so this is a contract the pipeline checks statically
     before the container ever runs, not a convention the model is asked to honour.
 
-    On a clean exit the beat is held open to `MIN_BEAT_S`, so no beat is too short
-    to seek to or to narrate over.
+    On entry anything the previous beat left on screen is faded out, so a beat
+    always opens on a clean frame. On a clean exit the beat is held open to
+    `MIN_BEAT_S`, so no beat is too short to seek to or to narrate over.
     """
+    _transition(scene)
     start = _scene_time(scene)
     try:
         yield
@@ -101,6 +116,31 @@ def beat(scene, beat_id: str):
         raise
     _hold(scene, start)
     _record(scene, beat_id, start)
+
+
+def _transition(scene) -> None:
+    """Fade out whatever the previous beat left behind.
+
+    Deliberately runs *before* the beat's start is recorded, so the fade belongs to
+    the gap between beats rather than to this beat's span. That is what a citation
+    depends on: seeking to `[beat:b4]` should land on b4's own picture, not on the
+    last frames of b3 dissolving.
+
+    `manim` is imported here rather than at module scope so this file stays
+    importable on a host that has no manim -- it is the module the pipeline reads
+    `MANIFEST_PATH` from, and only the container ever runs the animation half.
+
+    Never raises, for the same reason `_hold` does not: a transition is a nicety
+    and a rendered video is not.
+    """
+    try:
+        if not scene.mobjects:
+            return
+        from manim import FadeOut
+
+        scene.play(*[FadeOut(item) for item in scene.mobjects], run_time=TRANSITION_S)
+    except Exception:
+        pass
 
 
 def _hold(scene, start: float) -> None:
