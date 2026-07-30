@@ -8,6 +8,9 @@
 <meta name="theme-color" content="#0b0d12">
 <link rel="icon" href="/astray-mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
+<!-- Deferred scripts run in order, so `createDictation` is defined before the
+     session view looks for it. -->
+<script defer src="/voice.js"></script>
 <script defer src="/app.js"></script>
 </head>
 <body>
@@ -18,6 +21,28 @@
 <div class="backdrop" aria-hidden="true">
   <div class="aurora"><span></span><span></span><span></span></div>
 </div>
+
+<!-- The mark at small sizes, defined once and referenced with <use>.
+     `astray-mark.svg` is the full artwork: a coral core inside eight strokes,
+     four diagonal arms and four arcs closing the ring. It is drawn on a 248px
+     canvas and it needs that room. At the 13-17px this page asks for, an arc is
+     a third of a pixel of near-white on a dark ground, and the whole mark
+     collapses into a grey smudge -- it was loading and painting perfectly, and
+     still read as a missing image.
+     So this is the small-size cut: the four arms and the core, which is what
+     survives the reduction and still reads as the mark. Inline rather than an
+     <img> so the arms can take `currentColor` and tint to whatever line of type
+     they sit in; the core keeps the brand coral, which is the one hue worth
+     spending a pixel on at this size. -->
+<svg class="sprite" aria-hidden="true" width="0" height="0">
+  <symbol id="astray-mark" viewBox="0 0 248 248">
+    <path fill="currentColor" d="M54.5536 169.631C56.4464 167.738 59.5991 168.074 61.2036 170.217C65.8981 176.485 71.5155 182.022 77.8541 186.627C80.0415 188.216 80.4056 191.407 78.4938 193.319L28.7454 243.068C22.1695 249.644 11.5078 249.644 4.93191 243.068C-1.64398 236.492 -1.64389 225.831 4.93191 219.255L54.5536 169.631Z"/>
+    <path fill="currentColor" d="M186.291 169.762C187.888 167.597 191.06 167.247 192.962 169.149L243.068 219.255C249.644 225.831 249.644 236.492 243.068 243.068C236.492 249.644 225.83 249.644 219.255 243.068L169.149 192.962C167.247 191.06 167.597 187.888 169.762 186.292C176.065 181.642 181.642 176.065 186.291 169.762Z"/>
+    <path fill="currentColor" d="M219.255 4.93195C225.83 -1.64398 236.492 -1.64398 243.068 4.93195C249.644 11.5079 249.644 22.1695 243.068 28.7455L193.319 78.4938C191.407 80.4056 188.216 80.0407 186.627 77.8533C182.022 71.515 176.485 65.898 170.217 61.2037C168.074 59.5992 167.738 56.4464 169.631 54.5537L219.255 4.93195Z"/>
+    <path fill="currentColor" d="M4.93191 4.93195C11.5078 -1.64399 22.1695 -1.64396 28.7454 4.93195L78.0087 54.1952C79.9106 56.0975 79.5602 59.2689 77.3953 60.8658C71.0922 65.5153 65.5152 71.0923 60.8657 77.3954C59.2688 79.5602 56.0975 79.9107 54.1952 78.0087L4.93191 28.7455C-1.64398 22.1696 -1.64396 11.5079 4.93191 4.93195Z"/>
+    <circle cx="123.579" cy="123.579" r="52.62" fill="#FF9687"/>
+  </symbol>
+</svg>
 
 <header class="topbar">
   <a class="brand" href="#/"><img src="/astray-wordmark.svg" alt="Astray home" width="86" height="26"></a>
@@ -34,7 +59,7 @@
   <section class="pane pane-narrow">
     <div class="hero enter enter-1">
       <p class="eyebrow">
-        <img class="eyebrow-mark" src="/astray-mark.svg" alt="" width="13" height="13">
+        <svg class="eyebrow-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
         Misconception tutor
       </p>
       <h1 class="display">Find where your reasoning went astray.</h1>
@@ -124,7 +149,7 @@
           <div id="player-wrap" class="player is-empty">
             <div class="pipeline" id="pipeline" role="status">
               <p class="eyebrow">
-                <img class="eyebrow-mark" src="/astray-mark.svg" alt="" width="13" height="13">
+                <svg class="eyebrow-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
                 Building your animation
               </p>
               <ol id="stage-list" class="stages"></ol>
@@ -138,7 +163,7 @@
 
       <aside class="card chat" aria-labelledby="chat-title">
         <div class="chat-head">
-          <img class="chat-mark" src="/astray-mark.svg" alt="" width="17" height="17">
+          <svg class="chat-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
           <h2 class="card-title" id="chat-title">Ask about it</h2>
         </div>
         <div id="messages" class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
@@ -151,6 +176,14 @@
         <form id="chat-form" class="composer">
           <label class="sr-only" for="chat-input">Ask a question about your mistake</label>
           <input id="chat-input" placeholder="Why doesn't that work?" autocomplete="off" disabled>
+          <button class="btn btn-mic" id="mic-btn" type="button" disabled hidden
+                  aria-label="Ask by voice">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3.5a3 3 0 0 1 3 3V11a3 3 0 0 1-6 0V6.5a3 3 0 0 1 3-3Z"></path>
+              <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"></path>
+            </svg>
+          </button>
           <button class="btn btn-primary btn-send" type="submit" disabled aria-label="Send question">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -170,7 +203,7 @@
   <section class="pane pane-narrow">
     <div class="hero enter enter-1">
       <p class="eyebrow">
-        <img class="eyebrow-mark" src="/astray-mark.svg" alt="" width="13" height="13">
+        <svg class="eyebrow-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
         Insights
       </p>
       <h1 class="display">What people get wrong.</h1>

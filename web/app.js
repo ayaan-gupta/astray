@@ -25,6 +25,27 @@ const el = (tag, cls, text) => {
   if (text !== undefined) n.textContent = text;
   return n;
 };
+/* "Here's where it went <Astray>", with the last word set as the wordmark.
+ *
+ * The logo is a masked box rather than an <img>: the lettering is a single path
+ * filled `currentColor`, which an <img> renders in its own document context
+ * where `currentColor` is black -- invisible on this page. Painting
+ * `background: currentColor` through the artwork as a mask inverts that, so the
+ * word takes the exact colour of the headline it sits in and follows it through
+ * any future change of colour or theme.
+ *
+ * The word carries an accessible name, so the heading still reads as a whole
+ * sentence: "Here's where it went Astray".
+ */
+const headline = () => {
+  const h = el("h1", null, "Here's where it went ");
+  const word = el("span", "wordmark");
+  word.setAttribute("role", "img");
+  word.setAttribute("aria-label", "Astray");
+  h.append(word);
+  return h;
+};
+
 const api = (path, opts) => fetch(path, opts).then(async (r) => {
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || `request failed (${r.status})`);
@@ -326,13 +347,68 @@ function renderSession(sessionId) {
     drawRail();
   };
 
+  /* Voice input, wired to the composer.
+   *
+   * The transcript is written straight into the input as it arrives, so the
+   * student watches the sentence assemble and can see a misrecognition before
+   * it is sent rather than after. On a completed turn the question is submitted
+   * for them: the words they said appear as their own message either way, so a
+   * bad transcript is visible in the transcript rather than hidden behind a
+   * confirmation step.
+   *
+   * Starting a turn pauses the video, and that is the whole of the feedback
+   * problem this feature has. The narration is a voice explaining the student's
+   * own mistake; left playing, the microphone hears it and the recogniser
+   * cheerfully transcribes the tutor into the student's question. Muting is not
+   * enough on a laptop with open speakers, so the audio stops at the source.
+   * It does not resume by itself -- a video that restarts while you are reading
+   * the answer you just asked for is worse than one you press play on. */
+  const HINTS = {
+    idle: "Answers cite moments in your animation.",
+    listening: "Listening. Stop talking for a moment and I'll send it.",
+    blocked: "Microphone blocked. Allow it in your browser settings to ask by voice.",
+    error: "Voice input failed. Type the question instead.",
+  };
+
+  const mic = $("#mic-btn");
+  const dictation = window.createDictation({
+    onInterim: (text) => { $("#chat-input").value = text; },
+    onFinal: (text) => { $("#chat-input").value = ""; ask(text); },
+    onState: (state) => {
+      const live = state === "listening";
+      mic.classList.toggle("is-live", live);
+      mic.setAttribute("aria-label", live ? "Stop and send" : "Ask by voice");
+      mic.disabled = state === "blocked" || $("#chat-input").disabled;
+      $("#chat-input").placeholder = live ? "Listening…" : "Why doesn't that work?";
+      $("#chat-hint").textContent = HINTS[state] || HINTS.idle;
+    },
+  });
+
+  if (dictation.supported) {
+    mic.hidden = false;
+    mic.onclick = () => {
+      if (dictation.state !== "listening" && video && !video.paused) video.pause();
+      dictation.toggle();
+    };
+    // Escape abandons the turn rather than sending it, which is the one thing a
+    // student wants the moment they realise the room is too loud.
+    $("#chat-input").addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && dictation.state === "listening") {
+        e.preventDefault();
+        dictation.cancel();
+        $("#chat-input").value = "";
+      }
+    });
+  }
+
   /* Chat opens on `diagnosis_ready`, not on the video. Waiting for the render
    * would leave the student with nothing to do for three minutes. */
   const enableChat = () => {
     $("#chat-input").disabled = false;
-    $("#chat-form button").disabled = false;
+    $("#chat-form button[type=submit]").disabled = false;
+    if (dictation.supported && dictation.state !== "blocked") mic.disabled = false;
     document.querySelectorAll(".suggestion").forEach((s) => (s.disabled = false));
-    $("#chat-hint").textContent = "Answers cite moments in your animation.";
+    $("#chat-hint").textContent = HINTS.idle;
   };
 
   const suggestions = $("#suggestions");
@@ -436,6 +512,10 @@ function renderSession(sessionId) {
     e.preventDefault();
     const input = $("#chat-input");
     const q = input.value;
+    /* Enter during a turn sends what is in the box now. The turn has to be
+     * abandoned rather than finished, or the recogniser's own commit sends the
+     * same sentence a second time. */
+    if (dictation.state === "listening") dictation.cancel();
     input.value = "";
     ask(q);
   };
@@ -453,7 +533,7 @@ function renderSession(sessionId) {
     }
 
     card.append(el("p", "eyebrow", "Diagnosis"));
-    card.append(el("h1", null, "Here's where it went astray"));
+    card.append(headline());
     card.append(el("code", "rule", d.buggy_rule));
     card.append(el("p", null, d.misconception_statement));
 

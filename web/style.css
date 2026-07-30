@@ -295,13 +295,25 @@ main:focus { outline: none; }
   gap: 7px;
   margin: 0 0 14px;
   color: var(--primary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
+  /* Sentence case, and no tracking beyond the face's own. Wide tracking is a
+   * fix for a problem all-caps creates -- caps are uniform-height blocks that
+   * jam together -- so carrying it over to sentence case just pulls the word
+   * apart. The size goes up 1px because lowercase reads smaller than caps at
+   * the same point size. */
+  letter-spacing: 0;
 }
 
-.eyebrow-mark { display: block; }
+/* The sprite is a definitions-only <svg>: it must be in the document for <use>
+ * to resolve, and must never occupy a line box. */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Sized a little larger than the artwork it replaces. The small-size cut has
+ * four strokes instead of eight, so it can afford the room, and it needs it:
+ * the arms are ~23 of 248 units thick, which is only just over a pixel once
+ * this is 14px tall. */
+.eyebrow-mark { display: block; flex: 0 0 auto; width: 15px; height: 15px; }
 
 .display {
   margin: 0;
@@ -371,11 +383,21 @@ main:focus { outline: none; }
     var(--primary-soft-2),
     transparent 68%
   );
-  /* A positioned pseudo-element paints above the card's non-positioned content,
-   * so without a blend mode this washes coral over the text. `screen` can only
-   * lighten: near-white text is already at the ceiling and comes through
-   * untouched, while the dark card surface picks up the glow. The card's own
-   * backdrop-filter isolates the blend, so it never reaches the aurora. */
+  /* Behind the content, not over it. A positioned pseudo-element paints above
+   * the card's non-positioned in-flow content, so this layer used to sit on top
+   * of the inputs and the textarea: `screen` spared the near-white text, which
+   * is already at the ceiling, but the fields' own surface is a translucent
+   * dark (`oklch(0 0 0 / 0.24)`) and screen can only lighten, so the glow
+   * washed coral straight across every box it passed under.
+   *
+   * A negative z-index paints in the step between the element's own background
+   * and its in-flow content, which is exactly the band this belongs in: above
+   * the card surface it is meant to light, below every field and every line of
+   * type. It stays inside the card because the card's backdrop-filter makes it
+   * a stacking context, so -1 cannot escape to sit behind the page. */
+  z-index: -1;
+  /* Kept, and now unambiguous: the only thing left beneath this layer is the
+   * card surface, so `screen` lightens that and nothing else. */
   mix-blend-mode: screen;
   opacity: 0;
   transition: opacity 200ms ease-out;
@@ -479,6 +501,41 @@ main:focus { outline: none; }
 .btn-quiet:hover:not(:disabled) { --btn-bg: oklch(1 0 0 / 0.05); --btn-fg: var(--foreground); }
 
 .btn-send { flex: 0 0 auto; width: 42px; padding: 0; }
+
+/* The microphone. Square like the send button, quiet until it is live.
+ *
+ * An always-visible state is the point. A microphone the page can open without
+ * the student being able to tell at a glance reads as either broken or
+ * sinister, so listening is the loudest state in the composer: the button fills
+ * with the accent, and a ring pulses out of it for as long as the mic is open. */
+.btn-mic { flex: 0 0 auto; width: 42px; padding: 0; }
+
+.btn-mic.is-live {
+  --btn-bg: var(--primary);
+  --btn-fg: var(--primary-foreground);
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-mic.is-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px var(--primary);
+  animation: mic-pulse 1.6s var(--ease) infinite;
+  pointer-events: none;
+}
+
+@keyframes mic-pulse {
+  from { opacity: 0.85; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.42); }
+}
+
+/* A pulse is decoration on a state that is also carried by fill and by the
+ * button's accessible name, so it is safe to drop entirely. */
+@media (prefers-reduced-motion: reduce) {
+  .btn-mic.is-live::after { animation: none; opacity: 0.85; }
+}
 
 /* A play or arrow glyph sits right of its own optical centre, so a trailing
  * icon needs slightly less padding on its side than the text side. */
@@ -658,6 +715,31 @@ form > .btn { margin-top: 24px; }
 
 /* :not(.eyebrow) because the eyebrow is also a direct <p> child and an
  * element-bearing selector would out-specify .eyebrow's own margins. */
+/* The wordmark set inside a line of type.
+ *
+ * Every number here comes from the artwork's measured metrics rather than from
+ * eyeballing: the lettering box is 935.9 x 281.7, of which 241.7 sits above the
+ * baseline (cap height, the "A") and 40 below it (the descender of the "y").
+ *
+ *   height      0.82em  -- so cap height lands at 0.82 x 241.7/281.7 = 0.703em,
+ *                          which is the cap height of the surrounding face
+ *   width       height x 935.9/281.7
+ *   v-align    -0.1164em -- 0.82 x 40/281.7, dropping the box by exactly its
+ *                           own descender so the logo's baseline is the line's
+ *
+ * Getting this from metrics rather than by nudging matters because the headline
+ * is `clamp(25px, 3.2vw, 33px)`: em-relative values track it at every viewport
+ * width, where a pixel nudge would only be right at one. */
+.wordmark {
+  display: inline-block;
+  height: 0.82em;
+  width: calc(0.82em * 935.9 / 281.7);
+  vertical-align: -0.1164em;
+  background-color: currentColor;
+  mask: url(/astray-word.svg) no-repeat center / contain;
+  -webkit-mask: url(/astray-word.svg) no-repeat center / contain;
+}
+
 .diagnosis > p:not(.eyebrow) {
   margin: 16px 0 0;
   max-width: 62ch;
@@ -926,7 +1008,7 @@ form > .btn { margin-top: 24px; }
   border-bottom: 1px solid var(--border);
 }
 
-.chat-mark { display: block; flex: 0 0 auto; }
+.chat-mark { display: block; flex: 0 0 auto; width: 18px; height: 18px; color: var(--foreground); }
 
 .messages {
   flex: 1 1 auto;
@@ -947,10 +1029,9 @@ form > .btn { margin-top: 24px; }
 
 .who {
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .msg .body { max-width: 94%; color: var(--foreground-2); font-size: 14.5px; line-height: 1.62; }
@@ -1102,6 +1183,13 @@ form > .btn { margin-top: 24px; }
 
 /* ---------------------------------------------------------------- utilities */
 .hidden { display: none !important; }
+
+/* The `hidden` attribute is only a UA-stylesheet `display: none`, so any author
+ * rule setting `display` outranks it. `.btn` sets `display: inline-flex`, which
+ * meant `<button hidden>` still rendered -- the microphone would have been
+ * visible and inert on Safari and Firefox, the two browsers whose lack of
+ * SpeechRecognition is the entire reason it starts hidden. */
+[hidden] { display: none !important; }
 
 .sr-only {
   position: absolute;

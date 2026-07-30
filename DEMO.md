@@ -117,7 +117,9 @@ displays it and `/api/insights` never returns it.
    13.85s against that beat's measured start of 13.8s, and the rail's active chip
    follows the playhead as the video runs. Every chip is also a real accessible
    control ("Jump to 0:13, Area model"), so the rail is keyboard-reachable.
-4. **Chat** — three exchanges are already in the database and every reply carries
+4. **Chat** — ask one out loud with the microphone (see *Asking by voice* below;
+   grant the permission before recording). Three exchanges are already in the
+   database and every reply carries
    chips. The one to read aloud is *"Is my answer ever right, or is it always
    wrong?"*: the tutor answers the actual question, cites four beats, and describes
    the area model by its parts ("split into four pieces, `y^2`, `3y`, `3y`, and
@@ -130,6 +132,26 @@ displays it and `/api/insights` never returns it.
    different letters that canonicalised onto the same entry. The canonical
    statements are the taxonomy's own words, not the model's phrasing for this
    session, which is what makes them countable.
+
+## Asking by voice
+
+The composer has a microphone. Press it, ask the question out loud, stop talking,
+and it sends: the transcript appears in the box word by word as you speak, and a
+gap of about 1.6 seconds with nothing said ends the turn. Escape abandons it
+without sending. **Chrome or Edge only** -- the control hides itself entirely on
+Safari and Firefox, which have no `SpeechRecognition` -- and the mic permission
+prompt is a one-time click the browser will only accept from a real gesture, so
+grant it before you start recording rather than on camera.
+
+Pressing the mic **pauses the video**, deliberately. The narration is a voice
+explaining the mistake; left playing, the microphone hears it and the recogniser
+transcribes the tutor into the student's question. It does not resume by itself.
+
+Two things worth knowing. The recogniser streams audio to Google's servers, so
+this is the one part of the product that is not local. And it is general
+speech-to-text rather than a maths recogniser: it will hear "y squared plus nine"
+correctly and it will not reliably hear "(y+3)²", so the natural demo question is
+a sentence, not an expression. **Type the expression, speak the question.**
 
 ## The other two, each arguing a different way
 
