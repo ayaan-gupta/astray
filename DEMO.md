@@ -36,24 +36,41 @@ than the correct one and a thick red **X** is drawn straight over it, so the
 thing the beat exists to show is unreadable. Frames extracted at 31s, 33s, 35s
 and 37s all look the same, so it is not a transient mid-animation state.
 
-## The golden video is silent
+## The golden video is narrated
 
-Narration is built and wired, but `fish.audio` returned **HTTP 402 Insufficient
-API credit** for this key, so nothing has been synthesised yet. Note that
-fish.audio bills API credit *separately* from website/platform credit: top up at
-<https://fish.audio/app/developers> specifically, not the main billing page.
+It has a spoken track, six lines, one per beat, on the `s2.1-pro-free` model.
+**Play it with sound on.** The untouched render is kept beside it as `silent.mp4`
+if you want the quiet version on camera instead.
 
-Once there is credit, narrating the golden session is one command:
+| Beat | Narration | Speech | Beat window |
+|---|---|---|---|
+| b1 | "Expand y plus three, all squared." | 3.5s | 5.0s |
+| b2 | "y squared plus three y plus three y plus nine." | 3.2s | 6.4s |
+| b3 | "They got y squared plus nine." | 2.3s | 4.8s |
+| **b4** | "The correct expansion has six y, the buggy does not." | 3.7s | 7.0s |
+| b5 | "Let y equal one, correct gives sixteen, buggy gives ten." | 6.3s | 6.6s |
+| b6 | "The formula a squared plus two a b plus b squared." | 5.1s | 5.0s |
+
+Measured in the published file, speech begins at 5.17, 11.57, 16.38, 23.38 and
+29.91 seconds against measured beat starts of 5.0, 11.4, 16.2, 23.2 and 29.8. The
+~0.17s offset is the mp3's own lead-in, which is the head-room the word budget
+reserves. Duration is unchanged at 34.8s and nothing is truncated.
+
+b6 is the one line that had to be pulled 0.07s earlier to fit, which is the
+tail-fit rule doing its job. It is also the one line worth knowing is terse: a
+5.0s final beat cannot hold "a plus b, all squared, is a squared plus two a b plus
+b squared" (13 words, about 7s spoken), so it states the right-hand side only
+while the screen carries the identity. If you want the full sentence spoken, the
+render's final beat needs to be longer, not the budget looser.
+
+To re-narrate after any change:
 
 ```bash
 uv run python scripts/narrate_session.py 12a959d5-3a99-4343-a360-b681dd2aebbc
 ```
 
-It writes `narrated.mp4` beside the render and repoints the session at it, so the
-page serves the narrated video with no other change. Everything downstream of the
-TTS call is already verified against this exact video: clips land at 5.000,
-11.400, 16.200, 23.200 and 29.800 seconds against measured beat starts of 5.0,
-11.4, 16.2, 23.2 and 29.8, and the 34.8s duration is preserved.
+That is safe to run repeatedly. It reads `silent.mp4` and republishes over
+`video.mp4`, so the URL the page already serves keeps working.
 
 ## Before recording
 

@@ -5,13 +5,17 @@ silent video is a working session; a session whose render is discarded because a
 voice API was down is not. Every failure here logs and leaves the original video
 in place.
 
-The output is written beside the render as `narrated.mp4` and only swapped into
-the session's `video_path` once ffmpeg has produced a non-empty file, so a crash
-mid-mux cannot leave the session pointing at a truncated video.
+Narration publishes to the render's own path so the URL a session already serves
+keeps working, and copies the untouched render to `silent.mp4` beside it first.
+That copy is what makes the step re-runnable: a second pass reads it rather than
+feeding ffmpeg its own previous output, which ffmpeg refuses outright. The
+published file is swapped in atomically, so a crash mid-mux cannot leave a
+half-written video being served.
 """
 
 import asyncio
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +27,15 @@ from server.llm.deepseek import DeepSeekClient, LlmError
 from server.store import repo
 
 logger = logging.getLogger(__name__)
+
+# The untouched render, kept beside the published video.
+SILENT_NAME = "silent.mp4"
+
+
+def silent_source(video: Path) -> Path:
+    """The file to narrate: the preserved silent original if there is one."""
+    silent = video.parent / SILENT_NAME
+    return silent if silent.exists() else video
 
 
 @dataclass(frozen=True)
@@ -104,18 +117,33 @@ async def add_narration(
         for row in repo.list_beats(conn, session_id)
         if row["start_s"] is not None
     }
+    # Narrating publishes to the render's own path, so the URL the session already
+    # serves keeps working and nothing downstream has to be repointed. The silent
+    # original is preserved beside it under SILENT_NAME first, which is also what
+    # makes this re-runnable: a second pass reads the silent copy rather than
+    # feeding ffmpeg its own output, which it refuses outright.
+    source = silent_source(video)
     try:
         placements = mux.plan_timeline(
-            clips, starts, video_duration_s=await mux.probe_duration_s(video)
+            clips, starts, video_duration_s=await mux.probe_duration_s(source)
         )
-        out = video.parent / "narrated.mp4"
-        await mux.mux_in(video, placements, out, timeout_s=settings.render_timeout_s)
-    except (RuntimeError, KeyError, ValueError, TimeoutError) as exc:
+        staged = video.parent / "narrated.staging.mp4"
+        await mux.mux_in(source, placements, staged, timeout_s=settings.render_timeout_s)
+        if source == video:
+            # Copy rather than move: a move would leave the served path missing
+            # for the moment between the two operations.
+            shutil.copy2(video, video.parent / SILENT_NAME)
+        # Atomic, so a crash here cannot leave a half-written video being served.
+        staged.replace(video)
+    except (RuntimeError, KeyError, ValueError, TimeoutError, OSError) as exc:
         logger.warning("narration mux failed for %s: %s", session_id, exc)
         return NarrationResult(ok=False, skipped_reason=f"mux failed: {exc}")
 
-    repo.set_render_video(conn, session_id=session_id, video_path=str(out))
-    worst = max((p.drift_s for p in placements), default=0.0)
+    out = video
+    # Worst *absolute* drift. Taking a signed max reported 0.00s for a run whose
+    # final clip had been pulled 1.27s earlier, hiding the one placement that had
+    # actually moved.
+    worst = max((abs(p.drift_s) for p in placements), default=0.0)
     logger.info(
         "narrated %s: %d lines, %d chars, $%.4f, worst drift %.2fs",
         session_id,

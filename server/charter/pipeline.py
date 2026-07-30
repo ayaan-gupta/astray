@@ -261,9 +261,9 @@ class Pipeline:
                     settings=self._settings,
                     llm=self._client,
                 )
-                if narration.ok:
-                    result = result.model_copy(update={"video_path": narration.video_path})
-                elif narration.skipped_reason:
+                # No path to update: narration publishes to the render's own
+                # path, so what the session serves is already the narrated file.
+                if not narration.ok and narration.skipped_reason:
                     logger.info("no narration for %s: %s", session_id, narration.skipped_reason)
             repo.set_session_status(self._conn, session_id, "ready")
         return result

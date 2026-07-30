@@ -5,6 +5,7 @@ No test here touches the network (every HTTP call goes through
 on the argv `build_command` produces, which is where the mistakes actually live.
 """
 
+import re
 from pathlib import Path
 
 import httpx
@@ -18,6 +19,12 @@ from server.llm.deepseek import DeepSeekClient
 from server.store import repo
 from server.store.db import connect
 from tests.test_tutor import _diagnosis, _session
+
+
+def _timed(conn, session_id):
+    """Only beats the renderer measured, which is what `write_script` passes."""
+    return [r for r in repo.list_beats(conn, session_id) if r["start_s"] is not None]
+
 
 # ------------------------------------------------------------ speakable maths
 
@@ -78,6 +85,24 @@ def test_backticks_and_markdown_never_reach_the_voice():
 )
 def test_word_budget_scales_with_measured_duration(duration, expected):
     assert speech.budget_words(duration, 2.5) == expected
+
+
+def test_final_beat_gets_a_larger_budget_than_the_same_beat_mid_video():
+    """The last beat is the one place a longer line is safe: nothing follows it to
+    collide with, and _fit_last reclaims an overrun by starting it earlier. At the
+    tighter budget the golden render's closing line came out as "a squared, two a
+    b, plus b squared", a fragment that never says what the identity equals."""
+    assert speech.budget_words(5.0, 2.0, final=True) > speech.budget_words(5.0, 2.0)
+
+
+def test_final_budget_stays_inside_what_fit_last_can_reclaim():
+    """The extra words are only safe because the mux can pull the clip earlier, so
+    the allowance must not exceed what it is allowed to reclaim."""
+    duration, rate = 5.0, 2.0
+    extra_words = speech.budget_words(duration, rate, final=True) - speech.budget_words(
+        duration, rate
+    )
+    assert extra_words / rate <= speech.FINAL_OVERRUN_ALLOWANCE_S + 0.55
 
 
 def test_word_budget_leaves_room_at_both_ends():
@@ -444,15 +469,48 @@ async def test_prompt_carries_the_measured_duration_and_word_budget(tmp_path):
     conn = connect(tmp_path / "t.db")
     sid = _session(conn)
     repo.save_beats(conn, sid, _board())
-    repo.save_beat_timings(conn, sid, [BeatTiming(id="b1", start=0.0, end=6.0)])
-
-    prompt = narrate.build_prompt(
-        repo.get_diagnosis(conn, sid), repo.list_beats(conn, sid)[:1], 2.5
+    repo.save_beat_timings(
+        conn,
+        sid,
+        [BeatTiming(id="b1", start=0.0, end=6.0), BeatTiming(id="b2", start=6.0, end=12.0)],
     )
+
+    # Two beats, so the assertions land on a mid-video beat: the last one gets the
+    # deliberately looser final-beat budget.
+    prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.5)
     assert "6.0s on screen" in prompt
     assert "at most 13 words" in prompt
     assert "all squared" in prompt, "the phrase the whole misconception turns on"
     assert "em dash" in prompt
+
+
+async def test_prompt_forbids_the_ambiguous_reading_of_a_bracketed_square(tmp_path):
+    """Observed for real on the closing line: the model wrote "a plus b squared",
+    which a listener hears as a plus b-squared. That is the misconception itself,
+    narrated as if it were the correct rule."""
+    conn = connect(tmp_path / "t.db")
+    sid = _session(conn)
+    repo.save_beats(conn, sid, _board())
+    repo.save_beat_timings(conn, sid, [BeatTiming(id="b1", start=0.0, end=6.0)])
+
+    prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.0)
+    assert 'Never say "a plus b squared"' in prompt
+
+
+async def test_only_the_last_beat_gets_the_looser_budget(tmp_path):
+    conn = connect(tmp_path / "t.db")
+    sid = _session(conn)
+    repo.save_beats(conn, sid, _board())
+    repo.save_beat_timings(
+        conn,
+        sid,
+        [BeatTiming(id="b1", start=0.0, end=6.0), BeatTiming(id="b2", start=6.0, end=12.0)],
+    )
+    prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.0)
+
+    budgets = [int(n) for n in re.findall(r"at most (\d+) words", prompt)]
+    assert len(budgets) == 2
+    assert budgets[1] > budgets[0], "identical durations, so only finality can differ"
 
 
 async def test_untrusted_beat_text_is_neutralised_in_the_prompt(tmp_path):
@@ -465,34 +523,25 @@ async def test_untrusted_beat_text_is_neutralised_in_the_prompt(tmp_path):
     repo.save_beats(conn, sid, board)
     repo.save_beat_timings(conn, sid, [BeatTiming(id="b1", start=0.0, end=6.0)])
 
-    prompt = narrate.build_prompt(
-        repo.get_diagnosis(conn, sid), repo.list_beats(conn, sid)[:1], 2.5
-    )
+    prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.5)
     assert "<<<" not in prompt and ">>>" not in prompt
 
 
-# ------------------------------------------------------------------ repointing
+# ------------------------------------------------------------------ re-runnable
 
 
-def test_set_render_video_repoints_the_latest_successful_render(tmp_path):
-    conn = connect(tmp_path / "t.db")
-    sid = _session(conn)
-    repo.record_render(conn, session_id=sid, attempt=1, status="failed")
-    repo.record_render(conn, session_id=sid, attempt=2, status="ok", video_path="silent.mp4")
+def test_narration_reads_the_preserved_silent_copy_on_a_second_pass(tmp_path):
+    """Found by re-running it: the first pass published over the render's own
+    path, so a second pass handed ffmpeg its own previous output and it refused
+    with "Output same as Input". The silent copy is what breaks that cycle."""
+    from server.audio.pipeline import SILENT_NAME, silent_source
 
-    assert repo.set_render_video(conn, session_id=sid, video_path="narrated.mp4") is True
-    row = repo.latest_render(conn, sid)
-    assert row["video_path"] == "narrated.mp4"
-    assert row["attempt"] == 2 and row["mode"] == "generated", (
-        "attempt/status/mode measure how codegen went and must not move"
-    )
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"published")
+    assert silent_source(video) == video, "first pass narrates the render itself"
 
-
-def test_set_render_video_reports_when_there_is_nothing_to_repoint(tmp_path):
-    conn = connect(tmp_path / "t.db")
-    sid = _session(conn)
-    repo.record_render(conn, session_id=sid, attempt=1, status="failed")
-    assert repo.set_render_video(conn, session_id=sid, video_path="narrated.mp4") is False
+    (tmp_path / SILENT_NAME).write_bytes(b"original")
+    assert silent_source(video) == tmp_path / SILENT_NAME, "later passes use the original"
 
 
 # --------------------------------------------------------------------- wiring

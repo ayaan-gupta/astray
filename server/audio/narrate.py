@@ -50,9 +50,10 @@ Say maths as a teacher says it out loud. Never write a symbol.
   y^2 + 6y + 9 -> "y squared plus six y plus nine"
   2ab          -> "two a b"
   y=1          -> "y equals one"
-The phrase "all squared" is important. It is the difference between the correct \
-expansion and the mistake this student made, so use it whenever a bracket is \
-raised to a power.
+The phrase "all squared" is not optional. Say "a plus b, all squared". Never say \
+"a plus b squared", because a listener hears that as a plus b-squared, which is \
+the exact mistake this animation exists to correct. Use "all squared" every time \
+a bracket is raised to a power, including when you are stating the correct rule.
 
 One idea per sentence. Short sentences. Use contractions. Write the way a person \
 talks, not the way a textbook reads.
@@ -78,9 +79,11 @@ Beats, in order:
 Return one line per beat id, in this order: {ids}"""
 
 
-def _beat_brief(row: sqlite3.Row, words_per_second: float) -> tuple[str, int]:
+def _beat_brief(
+    row: sqlite3.Row, words_per_second: float, *, final: bool = False
+) -> tuple[str, int]:
     duration = float(row["end_s"]) - float(row["start_s"])
-    budget = speech.budget_words(duration, words_per_second)
+    budget = speech.budget_words(duration, words_per_second, final=final)
     marker = "  <- THIS BEAT SHOWS THE MISTAKE ITSELF" if row["targets_misconception"] else ""
     brief = (
         f'- {row["beat_id"]} "{_neutralize_markers(row["title"])}" '
@@ -94,8 +97,8 @@ def build_prompt(
     diagnosis_row: sqlite3.Row, beat_rows: list[sqlite3.Row], words_per_second: float
 ) -> str:
     briefs, ids = [], []
-    for row in beat_rows:
-        brief, _ = _beat_brief(row, words_per_second)
+    for index, row in enumerate(beat_rows):
+        brief, _ = _beat_brief(row, words_per_second, final=index == len(beat_rows) - 1)
         briefs.append(brief)
         ids.append(row["beat_id"])
     return PROMPT.format(
@@ -170,7 +173,10 @@ async def write_script(
     )
 
     by_id = {line.beat_id: line.line for line in script.lines}
-    budgets = {row["beat_id"]: _beat_brief(row, words_per_second)[1] for row in timed}
+    budgets = {
+        row["beat_id"]: _beat_brief(row, words_per_second, final=index == len(timed) - 1)[1]
+        for index, row in enumerate(timed)
+    }
 
     out: list[tuple[str, str]] = []
     for row in timed:

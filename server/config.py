@@ -35,15 +35,24 @@ class Settings(BaseSettings):
     # so every setting below trades speed for naturalness.
     fish_api_key: str | None = None
     fish_base_url: str = "https://api.fish.audio"
-    fish_model: str = "s2.1-pro"
+    # `s2.1-pro-free` is the same model as `s2.1-pro` on the free developer tier,
+    # under Fish's fair-use policy. The paid string returns HTTP 402 unless the
+    # account has *API* credit, which Fish bills separately from platform credit,
+    # so the free string is the working default and the paid one is opt-in.
+    fish_model: str = "s2.1-pro-free"
     # A voice id from fish.audio. Unset uses the model's own default voice, which
     # is a reasonable narrator; set it to keep one voice across every render.
     fish_voice_id: str | None = None
     narration_enabled: bool = True
     narration_timeout_s: int = 120
-    # Clear teaching speech, measured rather than assumed: see tests. Used to turn
-    # a beat's duration into a word budget the script has to fit.
-    narration_words_per_second: float = 2.5
+    # Measured, not assumed, and set near the slow end rather than the mean.
+    # Six real s2.1-pro lines at speed 0.96 averaged 2.17 words/second but ranged
+    # from 1.69 to 2.66: the more of a line is spoken maths, the slower it goes,
+    # and "a squared plus two a b plus b squared" is nearly all maths. Budgeting
+    # at the 2.5 first guessed here made a 16-word line 8.4s long inside a 7.0s
+    # beat; at 2.0 a 13-word closing line still came out at 1.82 w/s and overran.
+    # A short line costs nothing, so the bias belongs on this side.
+    narration_words_per_second: float = 1.75
     # Slightly under real time. Maths needs a fraction more room than prose.
     narration_speed: float = 0.96
 

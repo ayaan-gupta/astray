@@ -83,6 +83,12 @@ DIGITS = {
 }
 
 
+# How far the final line may overrun its beat. `mux._fit_last` reclaims this by
+# starting the clip earlier, bounded by the previous clip, so it is spendable
+# rather than wishful.
+FINAL_OVERRUN_ALLOWANCE_S = 2.0
+
+
 def _power(exponent: str) -> str:
     return POWER_WORDS.get(exponent, f"to the power of {DIGITS.get(exponent, exponent)}")
 
@@ -145,12 +151,23 @@ def word_count(text: str) -> int:
     return len(re.findall(r"[^\s]+", speakable(text)))
 
 
-def budget_words(duration_s: float, words_per_second: float) -> int:
-    """How many words fit in a beat, with a beat of silence left at each end.
+def budget_words(duration_s: float, words_per_second: float, *, final: bool = False) -> int:
+    """How many words fit in a beat, with a little silence left at each end.
 
     The trim is not decoration. Speech that begins on a beat's first frame lands
     before the visual it describes has finished being drawn, and speech running
     to the last frame collides with the next beat.
+
+    `final` loosens both allowances for the last beat, which is the one place a
+    longer line is safe: there is no next beat to collide with, and `mux._fit_last`
+    can pull an overrunning final clip earlier to fit. Without this the closing
+    line is the most squeezed in the whole script, and it is usually the one
+    stating the correct identity: budgeting the golden render's 5.0s final beat at
+    the tighter figure produced "a squared, two a b, plus b squared", a fragment
+    that never says what the identity equals.
     """
-    usable = max(0.0, duration_s - 0.55)
+    if final:
+        usable = max(0.0, duration_s - 0.25) + FINAL_OVERRUN_ALLOWANCE_S
+    else:
+        usable = max(0.0, duration_s - 0.55)
     return max(3, int(usable * words_per_second))
