@@ -72,20 +72,51 @@ def main() -> int:
         media = Path(settings.media_root) / row["id"]
         print(f"  {row['id']}  {row['handle']:<18} {counts}{'  +media' if media.exists() else ''}")
 
+    live = {row["id"] for row in keep}
+    orphans = _orphan_media(Path(settings.media_root), live)
+    if orphans:
+        print(f"\norphaned media, no session row ({len(orphans)}):")
+        for path in orphans:
+            print(f"  {path}")
+
     if not args.apply:
         print("\ndry run; pass --apply to delete")
         return 0
 
     for row in drop:
         for table in CHILD_TABLES:
-            conn.execute(f"delete from {table} where session_id = ?", (row["id"],))
+            conn.execute(f"delete from {table} where session_id = ?", (row["id"],))  # noqa: S608
         conn.execute("delete from sessions where id = ?", (row["id"],))
         media = Path(settings.media_root) / row["id"]
         if media.exists():
             shutil.rmtree(media)
+    for path in orphans:
+        shutil.rmtree(path)
 
-    print(f"\ndeleted {len(drop)} sessions")
+    print(f"\ndeleted {len(drop)} sessions and {len(orphans)} orphaned media directories")
     return 0
+
+
+def _orphan_media(media_root: Path, live: set[str]) -> list[Path]:
+    """Media directories with no session row at all.
+
+    These outlive the sessions they belonged to: a database reset, or a session
+    deleted by hand, leaves the workspace and its videos behind with nothing
+    pointing at them. Three were sitting in `media/` when this script was written,
+    from before it existed.
+
+    Directories whose names begin with an underscore are skipped. They are tooling
+    output rather than sessions -- `scripts/check_primitives.py` renders into
+    `media/_primitive_check` through the same runner, so it has no session row by
+    design and must not be swept away as an orphan.
+    """
+    if not media_root.exists():
+        return []
+    return sorted(
+        path
+        for path in media_root.iterdir()
+        if path.is_dir() and not path.name.startswith("_") and path.name not in live
+    )
 
 
 if __name__ == "__main__":

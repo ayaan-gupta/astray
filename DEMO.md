@@ -9,39 +9,32 @@ uv run uvicorn server.app:create_app --factory --port 8000
 
 ## The golden case
 
-**`(y + 3)^2` → `y^2 + 9`** — session `389e4eaf-58d3-4a79-aafc-037adcfbb26f`
+**`(y + 3)^2` → `y^2 + 9`** — session `84b52e28-05dd-4a33-a295-e3a3b6c167e7`
 
-<http://localhost:8000/#/session/389e4eaf-58d3-4a79-aafc-037adcfbb26f>
+<http://localhost:8000/#/session/84b52e28-05dd-4a33-a295-e3a3b6c167e7>
 
-Status `ready`, 61.1s narrated video, rendered from generated code on the **first
-attempt** with no repair round, for $0.0081. Five beats, timings measured by the
+Status `ready`, 33.8s narrated video, five beats with timings measured by the
 container's own clock:
 
 | Beat | Title | Primitive | Start |
 |---|---|---|---|
-| b1 | Area model of (a+b)² | `areamodel` | 0:00 |
-| **b2** | **Missing middle terms** | `areamodel` | **0:07** |
-| b3 | Two curves diverge | `graph` | 0:14 |
-| b4 | Full expansion | `algebra_steps` | 0:28 |
-| b5 | The formula | `algebra_steps` | 0:43 |
+| b1 | Student's rule | `algebra_steps` | 0:00 |
+| b2 | Number check | `algebra_steps` | 0:07 |
+| **b3** | **Area model** | **`areamodel`** | **0:13** |
+| b4 | Correct expansion | `algebra_steps` | 0:19 |
+| b5 | Comparison | `algebra_steps` | 0:27 |
 
-Three different kinds of visual, which is the point. **b2** is the beat flagged
-`targets_misconception`, so it carries the coral border in the rail, and it is the
-strongest frame in the run: the square of side (y+3) drawn to scale, `y²` and `9`
-dimmed to show what the student's rule accounts for, and the two `3y` rectangles
-held in yellow above the caption *"The middle terms are missing!"*.
+**b3 is the frame to hold on.** Two squares of side (1+3) side by side. The left
+one is tiled completely, `1²` and `3²` in blue with the two `1·3` rectangles in
+yellow, and totals `(1+3)² = 16`. The right one is the same size with the two
+rectangles left as dashed holes, and totals `1² + 3² = 10`. The student's rule does
+not produce a *different* square; it produces a square with something missing, and
+the six units of missing area are visible.
 
-**b3 is the one to linger on.** `(y+3)²` and `y²+9` plotted on one set of axes,
-separating visibly, with a dashed line at y=1 marking **16.00** against **10.00**.
-It is the same arithmetic the narration speaks and the diagnosis states, shown a
-third way, and it answers the objection a derivation invites: *how far off is it,
-really.*
-
-**Why this replaced the previous golden case.** The old `(y+3)^2` session
-(`12a959d5-…`) is still in the database and still works, and it is six beats of
-white maths text on black, all `algebra_steps`, because until recently that was
-the only primitive with a builder behind it. It also took three render attempts
-and two repair rounds to get there. Worth opening side by side if there is time.
+The cells are drawn to their real proportions, so `1²` is a small corner and `3²`
+is a large one. That is the whole reason the picture argues anything: a schematic
+diagram with arbitrary sizes would show the same four labels while giving up the
+only thing a picture adds over a derivation.
 
 ## The golden video is narrated
 
@@ -50,27 +43,20 @@ The untouched render is kept beside it as `silent.mp4`.
 
 Read end to end, which is how it was written:
 
-> A square of side a plus b is split into a squared, two a b rectangles, and b
-> squared. Your rule drops the two a b rectangles, so you get just a squared plus b
-> squared. Check with y equals one: the correct value is sixteen, but your answer
-> gives ten. The missing six y makes a big difference. Multiply y plus three by
-> itself: y times y gives y squared, y times three gives three y, three times y
-> gives another three y, and three times three gives nine. The correct formula is a
-> plus b, all squared, equals a squared plus two a b plus b squared. You wrote a
-> squared plus b squared, which leaves out the two a b. That middle term is
-> essential.
+> You thought a plus b, all squared, equals a squared plus b squared. For y equals
+> one, your rule gives ten, but the true answer is sixteen. An area model shows the
+> missing terms: two rectangles of three y each. Multiply y plus three by itself
+> gives y squared, plus two times three y, plus nine. So your answer is y squared
+> plus nine, missing the middle term six y.
 
-Note that it **describes what is on screen** rather than restating the algebra:
-"a square of side a plus b is split into…" over the area model, "your rule drops
-the two a b rectangles" over the beat that dims them, "sixteen but your answer
-gives ten" over the graph marking exactly those two values. That is a consequence
-of the beats being longer, not of better prompting: a word budget comes from a
-beat's measured duration, and beats of five to eighteen seconds have room for a
-sentence where beats of one second had room for a fragment.
+It **names what is on screen** rather than restating the algebra: "two rectangles
+of three y each" over the beat that draws exactly those two rectangles. That is a
+consequence of the beats being long enough to say something, not of better
+prompting: a word budget comes from a beat's measured duration, and every beat now
+has a five second floor.
 
 Every variable is spoken with forced phonemes, so "y" is the letter and not "ee",
-and "a" is the letter and not the article. 51.6s of speech in 61.1s of video, and
-every line lands inside its own beat: no overlap, and no overrun on the last one.
+and "a" is the letter and not the article.
 
 The voice is pinned to `ba1cd26ca87b42b2bf7d60c1f65f9242` ("Adam - Calm, Smart").
 That is not cosmetic: every beat is a separate API request, so an unset voice
@@ -96,10 +82,11 @@ Candidates measured on the same five lines, for reference:
 Every voice slows on dense spoken maths, so the budget is set just under the
 *slowest* line rather than the mean.
 
-To re-narrate after any change:
+To re-narrate after any change, which costs one model call and a few seconds of
+TTS against a render that already exists:
 
 ```bash
-uv run python scripts/narrate_session.py 389e4eaf-58d3-4a79-aafc-037adcfbb26f
+uv run python scripts/narrate_session.py 84b52e28-05dd-4a33-a295-e3a3b6c167e7
 ```
 
 Safe to run repeatedly: it reads `silent.mp4` and republishes over `video.mp4`,
@@ -111,7 +98,7 @@ Adopt the golden session's anonymous handle so **Insights → Your patterns**
 shows history rather than an empty state. Paste into the browser console once:
 
 ```js
-localStorage.setItem("astray.handle", "judging-v2"); location.reload()
+localStorage.setItem("astray.handle", "astray-final"); location.reload()
 ```
 
 The handle is a random per-browser id with no other meaning; the page never
@@ -123,37 +110,48 @@ displays it and `/api/insights` never returns it.
    live diagnosis if you want one on camera (~20s to the diagnosis card, the
    animation keeps building behind it).
 2. **Diagnosis card** — falsifiable rule `(a+b)^2 -> a^2 + b^2`, the plain
-   statement, and the badges: *✓ checked with SymPy · confidence 95%*. The SymPy
-   badge is the measured result, not the model's claim.
-3. **The animation and the rail** — click **0:07 Missing middle terms**; the
-   player seeks and the chip fills coral. Then **0:14 Two curves diverge** for the
-   graph. The rail scrolls the active beat into view, and the trailing fade shows
-   there are more beats past the edge.
-4. **Chat** — two exchanges are already in the database, and both replies carry
+   statement, and four badges: *✓ checked with SymPy · diverges at step 1 ·
+   confidence 95% · 2 other students made this error*. The SymPy badge is the
+   measured result, not the model's claim.
+3. **The animation and the rail** — click **0:13 Area model**; the player seeks to
+   13.85s against that beat's measured start of 13.8s, and the rail's active chip
+   follows the playhead as the video runs. Every chip is also a real accessible
+   control ("Jump to 0:13, Area model"), so the rail is keyboard-reachable.
+4. **Chat** — three exchanges are already in the database and every reply carries
    chips. The one to read aloud is *"Is my answer ever right, or is it always
-   wrong?"*: the tutor answers the actual question (only when one term is zero)
-   and cites three beats, including the area model by name. Click a chip and the
-   player jumps to that beat's measured start with the rail's active chip
-   following.
-5. **Insights** — `/#/insights`. The peers are other students whose different
-   problems canonicalised onto the same misconception, including one written in
-   different letters (`(x + 5)^2`). That is cross-session pattern tracking visible
-   in the UI.
+   wrong?"*: the tutor answers the actual question, cites four beats, and describes
+   the area model by its parts ("split into four pieces, `y^2`, `3y`, `3y`, and
+   `9`"). It can talk about the geometry because the geometry is there.
+5. **Insights** — `/#/insights`. *Your patterns* lists three different
+   misconceptions, one per demo session: *freshman's dream*,
+   *square-root-single-sign*, *chain-rule-omitted*. *Across everyone* shows
+   **3 students** on the binomial one, and the diagnosis card said *2 others* for
+   the same reason: one of those three wrote `(x + 5)^2`, a different problem in
+   different letters that canonicalised onto the same entry. The canonical
+   statements are the taxonomy's own words, not the model's phrasing for this
+   session, which is what makes them countable.
 
-## The other sessions
+## The other two, each arguing a different way
 
-Kept for variety, each showing a different primitive doing the work no other one
-could:
-
-| Problem | Misconception | The beat that argues |
+| Session | Problem | The beat that argues |
 |---|---|---|
-| `d/dx sin(x²)` → `cos(x²)` | dropped chain-rule factor | `graph`: `2x cos(x²)` against `cos(x²)`, two unrelated curves |
-| `x² = 16` → `x = 4` | lost the negative root | `numberline`: a second dot lands where the student had nothing |
+| `5901c1da-fe6b-4e55-a4f6-31bd5834cb38` | `x^2 = 16` → `x = 4` | `numberline`: a second dot lands at −4 where the student had nothing |
+| `224c344d-7e25-47d1-959d-a204edd29232` | `d/dx sin(x²)` → `cos(x²)` | `graph`: `2x cos(x²)` against `cos(x²)`, marked at x=0 as 0 against 1 |
 
 The lost-root case is the clearest argument for having more than one primitive.
 Every line the student wrote is true, so there is nothing to cross out and a
 side-by-side comparison has no content; the error is an *absence*, and on a line
 an absence is a place.
+
+## Worth knowing before you record
+
+**Per-run variation is real, and it has one cause.** Beats built from primitives
+render cleanly; beats where the model positions its own mobjects sometimes do not.
+Across a dozen runs the failures were all the same shape: a diagram at a quarter of
+its intended size jammed against the frame edge, or three lines of text stacked
+past the bottom. `layout.fit` and the `caption` stacking exist for exactly this and
+are now in the s7 prompt, but a hand-built beat can still come out worse than a
+primitive one. If a fresh render looks wrong, that is where to look first.
 
 ## Do not use this session on camera
 
@@ -161,5 +159,9 @@ an absence is a place.
 insights count real, and it has chat history, but it was rendered before the
 primitives existed and its comparison beat is unreadable: the student's own
 expression is set smaller than the correct one with a thick red **X** drawn
-straight over it. Frames at 31s, 33s, 35s and 37s all look the same, so it is not
-a transient mid-animation state. It exists to be counted, not to be shown.
+straight over it. It exists to be counted, not to be shown.
+
+`12a959d5-3a99-4343-a360-b681dd2aebbc` is the same `(y+3)^2` problem from before
+the primitives, and it is worth opening *deliberately* beside the golden case: six
+beats of white maths text on black, 34.8s, three render attempts and two repair
+rounds. Same pipeline, same problem, no picture.
