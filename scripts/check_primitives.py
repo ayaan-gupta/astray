@@ -64,8 +64,11 @@ class AstrayScene(Scene):
             corners, middles = binomial_square(
                 self, a_label="y", b_label="3", a_term="y^2", b_term="9", middle_term="3y"
             )
-            missing_area(self, corners, middles, "these two are the 6y you dropped")
+            missing_area(self, corners, middles, "these two are the $6y$ you dropped")
             area_totals(self, r"y^2 + 9", r"y^2 + 6y + 9")
+            # A third claimant on the bottom edge. A live render put this line
+            # straight on top of the totals above it.
+            caption(self, r"The buggy expansion misses the 2ab term, so 16\\neq10.")
             self.wait(0.4)
 
         with beat(self, "b5"):

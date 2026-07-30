@@ -8,13 +8,17 @@ helpers scale-to-fit rather than trusting the caller's sizing.
 
 import re
 
-from manim import DOWN, LEFT, RIGHT, FadeIn, FadeOut, Line, MathTex, Mobject, Text, VGroup
+from manim import DOWN, LEFT, RIGHT, UP, FadeIn, FadeOut, Line, MathTex, Mobject, Text, VGroup
 from primitives.prose import prose
 
 # Manim's default frame is 8 units tall, 14.22 wide. Leaving a margin keeps text
 # clear of the edge on the 854x480 preview resolution the runner uses.
 SAFE_WIDTH = 12.0
 SAFE_HEIGHT = 6.5
+
+# How many occupants a caption will step over before giving up and overlapping.
+# Enough for `area_totals`' two lines plus the diagram's own bottom edge.
+_CAPTION_LIFTS = 4
 
 
 def fit(mobject, width: float = SAFE_WIDTH, height: float = SAFE_HEIGHT):
@@ -136,16 +140,49 @@ def legend(entries: list[tuple[str, object]]) -> VGroup:
     return group
 
 
+def _overlaps(a, b, pad: float = 0.05) -> bool:
+    """Do two mobjects' bounding boxes intersect?"""
+    return (
+        a.get_right()[0] + pad > b.get_left()[0]
+        and a.get_left()[0] - pad < b.get_right()[0]
+        and a.get_top()[1] + pad > b.get_bottom()[1]
+        and a.get_bottom()[1] - pad < b.get_top()[1]
+    )
+
+
 def caption(scene, text: str, run_time: float = 0.6):
-    """One line of prose along the bottom edge, leaving the diagram above it alone.
+    """One line of prose along the bottom edge, stacked above whatever is there.
 
     `Text`, not `MathTex`: a caption is a sentence. Callers wanting an expression
     on the bottom edge should compose `safe_math` themselves.
+
+    The stacking is the part that matters. `caption` and `area.area_totals` both
+    want the bottom edge, and a beat legitimately uses both -- a live render put
+    *"The buggy expansion misses the 2ab term."* directly on top of the two totals
+    it was describing, so the frame carried three overlapping lines of text. Each
+    primitive reserving its own band cannot fix this, because neither knows the
+    other ran; asking the frame what is already there can.
     """
     line = Text(prose(text), font_size=26)
     if line.width > SAFE_WIDTH:
         line.scale_to_fit_width(SAFE_WIDTH)
     line.to_edge(DOWN, buff=0.28)
+
+    # Lift clear of whatever already occupies the bottom edge, one occupant at a
+    # time. A single pass is not enough and that is not a corner case: `area_totals`
+    # adds its two lines separately, so clearing the lower one lands the caption
+    # squarely on the upper one. Bounded, because the caption must not walk up
+    # through an entire diagram looking for space, and monotonic, so it terminates.
+    for _ in range(_CAPTION_LIFTS):
+        blocking = [item for item in scene.mobjects if _overlaps(line, item)]
+        if not blocking:
+            break
+        highest = max(item.get_top()[1] for item in blocking)
+        lifted = highest + 0.18 - line.get_bottom()[1]
+        if line.get_top()[1] + lifted > SAFE_HEIGHT / 2:
+            break  # nowhere left to go; an overlapping caption beats one off-frame
+        line.shift(UP * lifted)
+
     scene.play(FadeIn(line), run_time=run_time)
     return line
 
