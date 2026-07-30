@@ -23,7 +23,7 @@ observed render failures rather than in the abstract:
 """
 
 from primitives.algebra_steps import compare_rules, step_sequence
-from primitives.area import area_totals, binomial_square, missing_area
+from primitives.area import area_totals, binomial_square, compare_areas, missing_area
 from primitives.beats import beat
 from primitives.graph import compare_functions, mark_divergence
 from primitives.layout import caption, math_lines, title_card
@@ -34,6 +34,7 @@ __all__ = [
     "beat",
     "binomial_square",
     "caption",
+    "compare_areas",
     "compare_functions",
     "compare_rules",
     "mark_divergence",

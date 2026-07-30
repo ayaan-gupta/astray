@@ -32,7 +32,7 @@ import numpy as np
 from manim import FadeIn, FadeOut, MathTex, Scene
 
 from primitives.algebra_steps import compare_rules, step_sequence
-from primitives.area import area_totals, binomial_square, missing_area
+from primitives.area import area_totals, binomial_square, compare_areas, missing_area
 from primitives.beats import beat
 from primitives.graph import compare_functions, mark_divergence
 from primitives.layout import caption, title_card
@@ -71,6 +71,20 @@ class AstrayScene(Scene):
             caption(self, r"The buggy expansion misses the 2ab term, so 16\\neq10.")
             self.wait(0.4)
 
+        with beat(self, "b8"):
+            # The frame the model kept hand-rolling into an unreadable mess.
+            compare_areas(
+                self,
+                a_label="1",
+                b_label="3",
+                a_term="1",
+                b_term="9",
+                middle_term="3",
+                correct_total="16",
+                buggy_total="10",
+            )
+            self.wait(0.4)
+
         with beat(self, "b5"):
             right = lambda x: 2 * x * np.cos(x**2)
             wrong = lambda x: np.cos(x**2)
@@ -107,6 +121,7 @@ BEATS = [
     ("b5", "graph comparison"),
     ("b6", "graph with a pole"),
     ("b7", "missing root"),
+    ("b8", "area comparison"),
 ]
 
 

@@ -89,6 +89,17 @@ the primitive the beat's `primitive` field names.
         to scale. Unpacks as `corners, middles`. The strongest argument against
         `(a+b)^2 -> a^2 + b^2`: the two ab rectangles are visibly there. Pass the
         student's actual letters and terms, e.g. `a_label="y", b_label="3"`.
+        Numeric side labels are drawn to their real proportions, so
+        `a_label="1", b_label="3"` gives a small corner and a large one.
+
+    compare_areas(scene, a_label="a", b_label="b", a_term="a^2", b_term="b^2",
+                  middle_term="ab", correct_total="", buggy_total="",
+                  correct_label="Correct", buggy_label="Your rule") -> VGroup
+        The full square beside the student's, whose two ab regions are left as
+        dashed holes, with a total under each. Use this instead of building two
+        area models side by side yourself: the same outline accounting for less
+        area is the whole argument, and hand-rolled versions of this frame come
+        out unreadable.
 
     missing_area(scene, corners, middles, caption: str) -> Mobject
         Dim the corner squares, hold the two ab rectangles, caption them. Takes

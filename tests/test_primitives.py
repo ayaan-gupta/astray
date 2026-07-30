@@ -105,6 +105,9 @@ VETTED_EXTRA_IMPORTS = {
     "layout.py": {"re"},
     # Translates the LaTeX a model writes into a caption. Pure string rewriting.
     "prose.py": {"re"},
+    # Reads a number out of a side label, so a square labelled `a = 1`, `b = 3` is
+    # drawn to those proportions instead of contradicting them.
+    "area.py": {"re"},
 }
 
 

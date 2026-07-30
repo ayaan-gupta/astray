@@ -16,6 +16,8 @@ diagram with arbitrary proportions would show the same four labels while quietly
 giving up the only thing the picture adds.
 """
 
+import re
+
 from manim import (
     BLUE,
     DOWN,
@@ -27,6 +29,7 @@ from manim import (
     WHITE,
     YELLOW,
     Create,
+    DashedVMobject,
     FadeIn,
     Rectangle,
     Text,
@@ -57,6 +60,57 @@ FRAME_HEIGHT = 8.0
 CAPTION_ROOM = 0.85
 TOTALS_ROOM = 1.62
 
+# Side length of each square in `compare_areas`, where two have to share the width.
+COMPARE_SIDE = 4.9
+
+
+# The smaller side may not fall below this fraction of the whole, whatever the
+# numbers say. At a 1:9 ratio the small corner is too thin to hold its own label,
+# and an unreadable cell argues nothing.
+MIN_SIDE_FRACTION = 0.22
+
+_NUMBER = re.compile(r"(\d+(?:\.\d+)?)")
+
+
+def sides_from_labels(a_label: str, b_label: str, total: float) -> tuple[float, float] | None:
+    """Side lengths matching numeric labels, or None if they are not numeric.
+
+    The whole argument of this module is that the square is drawn to scale, so the
+    two `ab` rectangles are as large as the arithmetic says. That promise broke the
+    moment a caller passed real numbers: a live render labelled its cells `a = 1`
+    and `b = 3` while still drawing them 2:1 a-major, so `a^2 = 1` appeared four
+    times the area of `b^2 = 9`. The diagram contradicted its own labels, which is
+    worse than a schematic one -- a schematic makes no claim.
+
+    Labels like `y` or `x + 1` are not numeric and keep the default proportions,
+    which claim nothing beyond "one side is longer".
+    """
+    a_found = _NUMBER.search(a_label)
+    b_found = _NUMBER.search(b_label)
+    if not (a_found and b_found):
+        return None
+
+    a_value, b_value = float(a_found.group(1)), float(b_found.group(1))
+    if a_value <= 0 or b_value <= 0:
+        return None
+
+    share = a_value / (a_value + b_value)
+    share = max(MIN_SIDE_FRACTION, min(1 - MIN_SIDE_FRACTION, share))
+    return (total * share, total * (1 - share))
+
+
+def _hollow(width: float, height: float):
+    """An unfilled dashed cell: area the student's rule does not account for.
+
+    Wrapped in a VGroup of length two so it indexes like `_cell`, whose callers
+    reach for `cell[0]` to restyle the rectangle without touching its label.
+    """
+    box = DashedVMobject(
+        Rectangle(width=width, height=height, stroke_color=MIDDLE_COLOR, stroke_width=3),
+        num_dashes=24,
+    )
+    return VGroup(box, VGroup())
+
 
 def _cell(width: float, height: float, color, label: str, opacity: float = 0.35):
     """One labelled cell of the square, as a (rectangle, label) VGroup."""
@@ -78,6 +132,69 @@ def _cell(width: float, height: float, color, label: str, opacity: float = 0.35)
         text.scale_to_fit_height(height * 0.8)
     text.move_to(box.get_center())
     return VGroup(box, text)
+
+
+def build_square(
+    a_label: str = "a",
+    b_label: str = "b",
+    a_term: str = "a^2",
+    b_term: str = "b^2",
+    middle_term: str = "ab",
+    a_len: float = DEFAULT_A,
+    b_len: float = DEFAULT_B,
+    hollow_middles: bool = False,
+) -> tuple:
+    """Assemble a labelled (a+b)^2 square without animating or placing it.
+
+    Returns `(whole, outline, corners, middles, edges)`, so callers can reveal the
+    parts in whatever order their argument runs.
+
+    `hollow_middles` draws the two `ab` regions as unfilled dashed outlines instead
+    of solid cells, which is what the student's rule actually accounts for: a square
+    with a hole in it. That is the version `compare_areas` puts on the right.
+    """
+    total = a_len + b_len
+    scaled = sides_from_labels(a_label, b_label, total)
+    if scaled is not None:
+        a_len, b_len = scaled
+    origin = LEFT * (total / 2) + DOWN * (total / 2)
+
+    def at(x: float, y: float, width: float, height: float):
+        """Cell centre, from the square's bottom-left corner."""
+        return origin + RIGHT * (x + width / 2) + UP * (y + height / 2)
+
+    a_square = _cell(a_len, a_len, CORNER_COLOR, a_term)
+    b_square = _cell(b_len, b_len, CORNER_COLOR, b_term)
+    if hollow_middles:
+        top_right = _hollow(b_len, a_len)
+        bottom_left = _hollow(a_len, b_len)
+    else:
+        top_right = _cell(b_len, a_len, MIDDLE_COLOR, middle_term)
+        bottom_left = _cell(a_len, b_len, MIDDLE_COLOR, middle_term)
+
+    a_square.move_to(at(0, b_len, a_len, a_len))
+    top_right.move_to(at(a_len, b_len, b_len, a_len))
+    bottom_left.move_to(at(0, 0, a_len, b_len))
+    b_square.move_to(at(a_len, 0, b_len, b_len))
+
+    outline = Rectangle(width=total, height=total, stroke_color=WHITE, stroke_width=4)
+    outline.move_to(at(0, 0, total, total))
+
+    # Side labels along the top and left edges, so the reader can check the
+    # lengths against the cells rather than taking them on trust.
+    top_a = safe_math(a_label, font_size=30, color=GREY_B)
+    top_b = safe_math(b_label, font_size=30, color=GREY_B)
+    left_a = safe_math(a_label, font_size=30, color=GREY_B)
+    left_b = safe_math(b_label, font_size=30, color=GREY_B)
+    top_a.next_to(a_square, UP, buff=0.18)
+    top_b.next_to(top_right, UP, buff=0.18)
+    left_a.next_to(a_square, LEFT, buff=0.18)
+    left_b.next_to(bottom_left, LEFT, buff=0.18)
+
+    corners = VGroup(a_square, b_square)
+    middles = VGroup(top_right, bottom_left)
+    edges = VGroup(top_a, top_b, left_a, left_b)
+    return VGroup(outline, corners, middles, edges), outline, corners, middles, edges
 
 
 def binomial_square(
@@ -103,46 +220,14 @@ def binomial_square(
     """
     clear_frame(scene)
 
-    total = a_len + b_len
-    origin = LEFT * (total / 2) + DOWN * (total / 2)
-
-    def at(x: float, y: float, width: float, height: float):
-        """Cell centre, from the square's bottom-left corner."""
-        return origin + RIGHT * (x + width / 2) + UP * (y + height / 2)
-
-    a_square = _cell(a_len, a_len, CORNER_COLOR, a_term)
-    b_square = _cell(b_len, b_len, CORNER_COLOR, b_term)
-    top_right = _cell(b_len, a_len, MIDDLE_COLOR, middle_term)
-    bottom_left = _cell(a_len, b_len, MIDDLE_COLOR, middle_term)
-
-    a_square.move_to(at(0, b_len, a_len, a_len))
-    top_right.move_to(at(a_len, b_len, b_len, a_len))
-    bottom_left.move_to(at(0, 0, a_len, b_len))
-    b_square.move_to(at(a_len, 0, b_len, b_len))
-
-    outline = Rectangle(width=total, height=total, stroke_color=WHITE, stroke_width=4)
-    outline.move_to(at(0, 0, total, total))
+    whole, outline, corners, middles, edges = build_square(
+        a_label, b_label, a_term, b_term, middle_term, a_len, b_len
+    )
     # `missing_area` captions along the top edge and `area_totals` writes two lines
     # along the bottom, and a beat may use all three. Reserving the room here is
     # what keeps them from colliding: the first version fitted the square to the
     # full safe height, and the totals landed on top of the caption.
     reserved_height = min(SAFE_HEIGHT, FRAME_HEIGHT - CAPTION_ROOM - TOTALS_ROOM)
-
-    # Side labels along the top and left edges, so the reader can check the
-    # lengths against the cells rather than taking them on trust.
-    top_a = safe_math(a_label, font_size=30, color=GREY_B)
-    top_b = safe_math(b_label, font_size=30, color=GREY_B)
-    left_a = safe_math(a_label, font_size=30, color=GREY_B)
-    left_b = safe_math(b_label, font_size=30, color=GREY_B)
-    top_a.next_to(a_square, UP, buff=0.18)
-    top_b.next_to(top_right, UP, buff=0.18)
-    left_a.next_to(a_square, LEFT, buff=0.18)
-    left_b.next_to(bottom_left, LEFT, buff=0.18)
-
-    corners = VGroup(a_square, b_square)
-    middles = VGroup(top_right, bottom_left)
-    edges = VGroup(top_a, top_b, left_a, left_b)
-    whole = VGroup(outline, corners, middles, edges)
 
     # Fit the assembled group, never the pieces: scaling cells individually
     # would break the very proportions the argument rests on.
@@ -195,6 +280,66 @@ def missing_area(
     scene.play(edges.animate.set_stroke(color=MIDDLE_COLOR, width=5), run_time=run_time * 0.6)
     scene.play(FadeIn(text), run_time=run_time)
     return text
+
+
+def compare_areas(
+    scene,
+    a_label: str = "a",
+    b_label: str = "b",
+    a_term: str = "a^2",
+    b_term: str = "b^2",
+    middle_term: str = "ab",
+    correct_total: str = "",
+    buggy_total: str = "",
+    correct_label: str = "Correct",
+    buggy_label: str = "Your rule",
+    run_time: float = 0.8,
+):
+    """The full square beside the student's, whose middle rectangles are hollow.
+
+    This primitive exists because the model kept building it by hand. Two separate
+    live runs reached for a side-by-side area comparison, and both hand-rolled it
+    into an unreadable frame: overlapping rectangles at mismatched scales, red boxes
+    drawn over yellow ones, labels landing outside the cells they named.
+
+    That is the argument worth making, though. The left square is filled and totals
+    16; the right is the same size with the two `ab` regions left as dashed holes and
+    totals 10. The student's rule does not produce a different square, it produces a
+    square with something missing, and the two frames side by side is the only way to
+    show the same outline accounting for less area.
+
+    Returns a VGroup that unpacks as `correct_group, buggy_group`.
+    """
+    clear_frame(scene)
+
+    # Sized so the pair fills the frame rather than sitting small in the middle of
+    # it. `fit` only ever scales down, so a group assembled at one square's default
+    # size stays at half the available width however much room is left. Two squares
+    # of side COMPARE_SIDE plus the gap come to 11.0 across, inside SAFE_WIDTH, and
+    # a side plus its heading and total to about 6.4, inside SAFE_HEIGHT.
+    scale = COMPARE_SIDE / (DEFAULT_A + DEFAULT_B)
+    a_len, b_len = DEFAULT_A * scale, DEFAULT_B * scale
+
+    def column(hollow: bool, heading: str, total: str, color) -> VGroup:
+        square, _, _, _, _ = build_square(
+            a_label, b_label, a_term, b_term, middle_term, a_len, b_len, hollow_middles=hollow
+        )
+        parts = [Text(prose(heading), font_size=26, color=color), square]
+        if total:
+            parts.append(safe_math(total, font_size=32, color=color))
+        return VGroup(*parts).arrange(DOWN, buff=0.3)
+
+    correct = column(False, correct_label, correct_total, GREEN)
+    buggy = column(True, buggy_label, buggy_total, MIDDLE_COLOR)
+
+    # `aligned_edge=UP` so the two headings sit on one line and the two squares start
+    # at the same height, which is what makes the missing area comparable by eye.
+    columns = VGroup(correct, buggy).arrange(RIGHT, buff=1.2, aligned_edge=UP)
+    fit(columns)
+
+    scene.play(FadeIn(correct), run_time=run_time)
+    scene.play(FadeIn(buggy), run_time=run_time)
+    return columns
 
 
 def area_totals(scene, kept: str, actual: str, run_time: float = 0.8):
