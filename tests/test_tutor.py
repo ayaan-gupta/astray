@@ -13,7 +13,7 @@ from server.charter.contracts import (
     StudentSubmission,
     SympyCheck,
 )
-from server.llm.deepseek import DeepSeekClient
+from server.llm.deepseek import DeepSeekClient, LlmError
 from server.store import insights, repo
 from server.store.db import connect
 from server.store.seed_taxonomy import seed
@@ -218,6 +218,34 @@ async def test_answer_persists_validated_citations_only(tmp_path):
     rows = repo.list_chat(conn, sid)
     assert [r["role"] for r in rows] == ["user", "assistant"]
     assert json.loads(rows[1]["cited_beats_json"]) == ["b2"]
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "[beat:b7]"])
+async def test_an_empty_reply_raises_and_persists_nothing(tmp_path, raw):
+    """A reply with no content left is an upstream failure, not an answer.
+
+    Observed live: a question came back blank and the empty string was stored as
+    an assistant turn, which the client replays as a blank bubble on every reload.
+    Nothing may be written, including the question -- a retry must not find itself
+    answering a conversation that already contains a silence.
+
+    The `[beat:b7]` case is the same failure by a different route: a reply that was
+    nothing but a citation to a beat this session does not have is empty once the
+    dead citation is stripped.
+    """
+    conn = connect(tmp_path / "t.db")
+    sid = _session(conn)
+    repo.save_beats(conn, sid, _board())
+
+    with pytest.raises(LlmError):
+        await chat.answer(
+            conn,
+            _client(raw),
+            session_id=sid,
+            question="why?",
+            model="deepseek-v4-flash",
+        )
+    assert repo.list_chat(conn, sid) == []
 
 
 async def test_prompt_carries_measured_timings_and_marks_the_target_beat(tmp_path):

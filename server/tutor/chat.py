@@ -25,7 +25,7 @@ import sqlite3
 
 from server.charter.contracts import LlmCallMeta
 from server.charter.stages.s1_diagnose import _generate_nonce, _neutralize_markers
-from server.llm.deepseek import DeepSeekClient
+from server.llm.deepseek import DeepSeekClient, LlmError
 from server.store import repo
 
 logger = logging.getLogger(__name__)
@@ -204,6 +204,20 @@ async def answer(
 
     raw, meta = await client.complete_text(messages=messages, model=model)
     reply, cited = validate_citations(strip_em_dashes(strip_latex_delimiters(raw)), known)
+
+    if not reply:
+        # An empty reply is an upstream failure, not an answer, and it must not be
+        # persisted: `complete_text` coerces a missing `content` to "", so nothing
+        # upstream of here distinguishes "the model said nothing" from "the model
+        # said something". Observed live -- a seeded demo question came back blank
+        # and the empty string was stored as an assistant turn, which the client
+        # replays forever as a blank bubble on every page load.
+        #
+        # Raising before either write is what makes a retry clean: neither the
+        # question nor the non-answer is in the history, so the next attempt is not
+        # answering a conversation that already contains a silence.
+        logger.warning("empty reply for session %s; not persisting", session_id)
+        raise LlmError("model returned an empty reply")
 
     repo.save_chat_message(conn, session_id=session_id, role="user", content=question)
     repo.save_chat_message(
