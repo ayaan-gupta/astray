@@ -40,19 +40,27 @@ class Settings(BaseSettings):
     # account has *API* credit, which Fish bills separately from platform credit,
     # so the free string is the working default and the paid one is opt-in.
     fish_model: str = "s2.1-pro-free"
-    # A voice id from fish.audio. Unset uses the model's own default voice, which
-    # is a reasonable narrator; set it to keep one voice across every render.
-    fish_voice_id: str | None = None
+    # Pinning a voice is not optional, and leaving it unset was a real bug: every
+    # beat is a separate request, so with no reference_id each one comes back in a
+    # different voice and a six-beat video has six narrators.
+    #
+    # "Adam - Calm, Smart", chosen on measured evidence. Across five candidates on
+    # the same five lines it was the fastest of the calm voices (2.84 words/second
+    # mean against 2.21 for the steadiest), which matters because the video is a
+    # fixed 34.8s: a faster voice fits ~89 words of explanation where a slower one
+    # fits ~69, and too few words is what makes narration sound like disconnected
+    # captions. Re-measure with scripts/measure_voice.py when changing this.
+    fish_voice_id: str | None = "ba1cd26ca87b42b2bf7d60c1f65f9242"
     narration_enabled: bool = True
     narration_timeout_s: int = 120
-    # Measured, not assumed, and set near the slow end rather than the mean.
-    # Six real s2.1-pro lines at speed 0.96 averaged 2.17 words/second but ranged
-    # from 1.69 to 2.66: the more of a line is spoken maths, the slower it goes,
-    # and "a squared plus two a b plus b squared" is nearly all maths. Budgeting
-    # at the 2.5 first guessed here made a 16-word line 8.4s long inside a 7.0s
-    # beat; at 2.0 a 13-word closing line still came out at 1.82 w/s and overran.
-    # A short line costs nothing, so the bias belongs on this side.
-    narration_words_per_second: float = 1.75
+    # A property of the chosen voice, not a constant, and measured rather than
+    # guessed: scripts/measure_voice.py reports it. For the pinned voice above the
+    # mean is 2.84 words/second and the slowest line is 2.57, so this sits just
+    # under the slowest, because a line that overruns pushes the next one late
+    # while a short line costs nothing. Every voice measured slows markedly on
+    # dense spoken maths, which is why the slow end is the one that matters.
+    # Re-measure when changing fish_voice_id: candidates spanned 2.14 to 2.84.
+    narration_words_per_second: float = 2.49
     # Slightly under real time. Maths needs a fraction more room than prose.
     narration_speed: float = 0.96
 

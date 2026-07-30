@@ -99,18 +99,32 @@ product turns on, because it is what distinguishes the correct expansion from th
 misconception. Punctuation is left alone deliberately, since it is the only
 control over where the voice breathes.
 
-The speaking rate is measured rather than assumed, and that mattered: real
-`s2.1-pro` lines averaged 2.17 words/second but ranged from 1.69 to 2.66, because
-the more of a line is spoken maths the slower it goes. The first guess of 2.5 made
-a 16-word line 8.4s long inside a 7.0s beat, so the budget now sits near the slow
-end at 1.75.
+Two things decide whether this sounds like a tutor or like a machine, and both
+were learned the hard way.
+
+**One voice, pinned.** Every beat is a separate API request, so leaving
+`reference_id` unset gives a six-beat video six different narrators. The voice is
+chosen on measured evidence rather than taste: `scripts/measure_voice.py`
+synthesises a fixed set of lines and reports words per second and its spread, and
+across five candidates the same two sentences ranged from 7.7s to 10.5s. The
+budget is calibrated to whichever voice is pinned, set just under its *slowest*
+line, because every voice measured slows markedly on dense spoken maths.
+
+**One explanation, not six captions.** The first version passed the model only a
+rule name and a one-line statement, and capped each beat at about ten words in
+isolation. It produced exactly what you would expect: six disconnected fragments
+like "They got y squared plus nine." The prompt now carries the problem, the
+student's own working, the correct steps and the diagnosis evidence, shows a
+worked example of the standard to match, and gives each beat a word *target* as
+well as a maximum. A cap alone reads as a floor: told only "at most N words", the
+model writes a caption and leaves the animation playing in silence.
 
 Narration is non-fatal. A silent video is a working session; a render discarded
 because a voice API was down is not, so every failure logs and leaves the
-original video in place. It also republishes over the render's own path, keeping
-the untouched original beside it as `silent.mp4`, which is what makes the step
-safe to re-run: a second pass reads that copy instead of handing ffmpeg its own
-previous output.
+original video in place. It republishes over the render's own path and keeps the
+untouched original beside it as `silent.mp4`, which is what makes the step safe to
+re-run: a second pass reads that copy instead of handing ffmpeg its own previous
+output.
 
 Set `FISH_MODEL=s2.1-pro-free` (the default) for the free developer tier. The paid
 `s2.1-pro` string returns HTTP 402 unless the account holds *API* credit, which

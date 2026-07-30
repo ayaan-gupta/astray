@@ -38,30 +38,40 @@ and 37s all look the same, so it is not a transient mid-animation state.
 
 ## The golden video is narrated
 
-It has a spoken track, six lines, one per beat, on the `s2.1-pro-free` model.
-**Play it with sound on.** The untouched render is kept beside it as `silent.mp4`
-if you want the quiet version on camera instead.
+One voice throughout, six lines, 75 words, on `s2.1-pro-free`. **Play it with
+sound on.** The untouched render is kept beside it as `silent.mp4`.
 
-| Beat | Narration | Speech | Beat window |
-|---|---|---|---|
-| b1 | "Expand y plus three, all squared." | 3.5s | 5.0s |
-| b2 | "y squared plus three y plus three y plus nine." | 3.2s | 6.4s |
-| b3 | "They got y squared plus nine." | 2.3s | 4.8s |
-| **b4** | "The correct expansion has six y, the buggy does not." | 3.7s | 7.0s |
-| b5 | "Let y equal one, correct gives sixteen, buggy gives ten." | 6.3s | 6.6s |
-| b6 | "The formula a squared plus two a b plus b squared." | 5.1s | 5.0s |
+Read end to end, which is how it was written:
 
-Measured in the published file, speech begins at 5.17, 11.57, 16.38, 23.38 and
-29.91 seconds against measured beat starts of 5.0, 11.4, 16.2, 23.2 and 29.8. The
-~0.17s offset is the mp3's own lead-in, which is the head-room the word budget
-reserves. Duration is unchanged at 34.8s and nothing is truncated.
+> We need to expand y plus three, all squared. y plus three times itself gives y
+> squared, three y plus three y, and nine. You squared each term separately, giving
+> y squared plus nine. Your answer y squared plus nine is missing the middle term
+> six y. Try y equals one. The correct answer is sixteen, yours gives ten. Remember
+> a plus b, all squared is a squared plus two a b plus b squared.
 
-b6 is the one line that had to be pulled 0.07s earlier to fit, which is the
-tail-fit rule doing its job. It is also the one line worth knowing is terse: a
-5.0s final beat cannot hold "a plus b, all squared, is a squared plus two a b plus
-b squared" (13 words, about 7s spoken), so it states the right-hand side only
-while the screen carries the identity. If you want the full sentence spoken, the
-render's final beat needs to be longer, not the budget looser.
+The voice is pinned to `ba1cd26ca87b42b2bf7d60c1f65f9242` ("Adam - Calm, Smart").
+That is not cosmetic: every beat is a separate API request, so an unset voice
+gives one video six different narrators.
+
+To change voice, set `FISH_VOICE_ID` and then re-measure the rate, because the
+word budget is calibrated to the voice:
+
+```bash
+uv run python scripts/measure_voice.py <voice-id>
+```
+
+Candidates measured on the same five lines, for reference:
+
+| Voice | Mean w/s | Slowest | Spread | Words that fit in 34.8s |
+|---|---|---|---|---|
+| Adam - Calm, Smart | 2.84 | 2.57 | 0.74 | ~89 |
+| calm storyteller male | 2.73 | 2.50 | 0.66 | ~85 |
+| Jon - Warm & Grounded | 2.33 | 2.04 | 0.65 | ~71 |
+| Nathan - Audiobook | 2.21 | 2.04 | 0.59 | ~69 |
+| CALM- NORMAL | 2.14 | 1.80 | 0.73 | ~66 |
+
+Every voice slows on dense spoken maths, so the budget is set just under the
+*slowest* line rather than the mean.
 
 To re-narrate after any change:
 
@@ -69,8 +79,8 @@ To re-narrate after any change:
 uv run python scripts/narrate_session.py 12a959d5-3a99-4343-a360-b681dd2aebbc
 ```
 
-That is safe to run repeatedly. It reads `silent.mp4` and republishes over
-`video.mp4`, so the URL the page already serves keeps working.
+Safe to run repeatedly: it reads `silent.mp4` and republishes over `video.mp4`,
+so the URL the page already serves keeps working.
 
 ## Before recording
 

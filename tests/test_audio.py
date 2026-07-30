@@ -73,6 +73,22 @@ def test_rule_arrow_is_not_read_as_two_operators():
     )
 
 
+@pytest.mark.parametrize(
+    "written,spoken",
+    [
+        ("y plus three all squared", "y plus three, all squared"),
+        ("y plus three, all squared", "y plus three, all squared"),
+        ("x plus one all cubed", "x plus one, all cubed"),
+    ],
+    ids=["comma-inserted", "existing-comma-not-doubled", "cubed-too"],
+)
+def test_all_squared_always_gets_its_comma(written, spoken):
+    """The comma is the breath that makes the grouping audible, and it is the whole
+    difference between the correct reading and the misconception. The prompt asks
+    for it; the model dropped it on two of six lines."""
+    assert speech.speakable(written) == spoken
+
+
 def test_backticks_and_markdown_never_reach_the_voice():
     """Chat renders backticks; a voice reads them out or stumbles."""
     assert speech.speakable("the term `2ab` is **missing**") == "the term two a b is missing"
@@ -80,7 +96,7 @@ def test_backticks_and_markdown_never_reach_the_voice():
 
 @pytest.mark.parametrize(
     "duration,expected",
-    [(0.0, 3), (1.0, 3), (4.2, 9), (7.0, 16), (20.0, 48)],
+    [(0.0, 3), (1.0, 3), (4.2, 9), (7.0, 16), (20.0, 49)],
     ids=["zero", "too-short-hits-floor", "short", "medium", "long"],
 )
 def test_word_budget_scales_with_measured_duration(duration, expected):
@@ -312,6 +328,19 @@ async def test_synthesize_asks_for_the_quality_path_not_the_fast_one():
     assert "quality-guard" in seen["features"]
     assert seen["reference_id"] == "voice-abc", "one pinned voice across every beat"
     assert seen["prosody"]["speed"] == pytest.approx(0.96)
+    assert seen["prosody"]["normalize_loudness"] is True
+    assert seen["temperature"] < 0.7, (
+        "each beat is a separate request, so default sampling variance is what makes "
+        "stitched narration sound stitched"
+    )
+
+
+def test_a_voice_is_pinned_by_default():
+    """Leaving reference_id unset was a real shipped bug: six beats, six separate
+    requests, six different narrators in one video."""
+    from server.config import Settings
+
+    assert Settings(deepseek_api_key="k").fish_voice_id, "a voice must be pinned"
 
 
 async def test_synthesize_raises_on_an_http_error():
@@ -479,7 +508,8 @@ async def test_prompt_carries_the_measured_duration_and_word_budget(tmp_path):
     # deliberately looser final-beat budget.
     prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.5)
     assert "6.0s on screen" in prompt
-    assert "at most 13 words" in prompt
+    assert "hard maximum 14" in prompt
+    assert "aim for 11 words" in prompt, "a cap alone reads as a floor"
     assert "all squared" in prompt, "the phrase the whole misconception turns on"
     assert "em dash" in prompt
 
@@ -508,7 +538,7 @@ async def test_only_the_last_beat_gets_the_looser_budget(tmp_path):
     )
     prompt = narrate.build_prompt(repo.get_diagnosis(conn, sid), _timed(conn, sid), 2.0)
 
-    budgets = [int(n) for n in re.findall(r"at most (\d+) words", prompt)]
+    budgets = [int(n) for n in re.findall(r"hard maximum (\d+)", prompt)]
     assert len(budgets) == 2
     assert budgets[1] > budgets[0], "identical durations, so only finality can differ"
 

@@ -91,6 +91,16 @@ class FishAudioClient:
             # single chunk, which keeps prosody coherent across the whole line
             # instead of resetting mid-sentence.
             "chunk_length": 300,
+            # Below the 0.7 default. Each beat is a separate request, so sampling
+            # variance shows up as the delivery changing between one clip and the
+            # next even on a single pinned voice, which is the thing that makes
+            # stitched narration sound stitched. Not lower than this: the further
+            # it drops the flatter the read gets, and a flat tutor is its own
+            # problem.
+            "temperature": 0.6,
+            "top_p": 0.7,
+            # Keeps every clip at the same perceived level, so the mix does not
+            # need per-clip gain to stop one beat jumping out.
             "prosody": {"speed": self._speed, "normalize_loudness": True},
         }
         if self._voice_id:

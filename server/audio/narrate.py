@@ -12,6 +12,7 @@ where the voice needs to breathe. `speech.py` is the net for anything the model
 still writes in notation.
 """
 
+import json
 import logging
 import sqlite3
 
@@ -39,13 +40,34 @@ class NarrationScript(BaseModel):
     lines: list[NarrationLine] = Field(default_factory=list)
 
 
-PROMPT = """You are writing the spoken narration for a short maths animation. A \
-student made a specific mistake, the animation explains that mistake, and your \
-words are read aloud over it by a text-to-speech voice.
+PROMPT = """You are the voice of a maths tutor, narrating a short animation made \
+for one student's specific mistake. Your words are read aloud over it.
 
-You are writing for the ear, not the page. Follow these rules exactly.
+Write ONE continuous explanation, then divide it across the beats listed below.
+This is the most important instruction here. Read end to end, your lines must
+sound like a single person explaining one idea from start to finish, each sentence
+following from the last. What you must not produce is a list of disconnected
+fragments, one per beat, each restating a label. "They got y squared plus nine."
+is a caption, not an explanation. Explain WHY the mistake happens and what the
+student should do instead.
 
-Say maths as a teacher says it out loud. Never write a symbol.
+Here is the standard to match, for a student who wrote (y+3)^2 = y^2 + 9:
+
+  "Squaring a bracket isn't the same as squaring each piece separately."
+  "y plus three, all squared, just means y plus three times itself."
+  "Multiply that out and every term meets every other term."
+  "So you get y squared, then three y twice over, then nine."
+  "Those two middle terms are what you dropped. Together they make six y."
+  "Try y equals one. The real answer is sixteen, and yours gives ten."
+
+Notice what that does. It gives a reason, walks through it, names the dropped
+term, and checks it with a number. Each line is a complete sentence, and the
+lines join into one argument.
+
+Each beat is synthesised separately, so every line must be complete sentences on
+its own. Never let a sentence run from one beat into the next.
+
+Say maths the way a teacher says it out loud. Never write a symbol.
   (y+3)^2      -> "y plus three, all squared"
   y^2 + 6y + 9 -> "y squared plus six y plus nine"
   2ab          -> "two a b"
@@ -53,25 +75,28 @@ Say maths as a teacher says it out loud. Never write a symbol.
 The phrase "all squared" is not optional. Say "a plus b, all squared". Never say \
 "a plus b squared", because a listener hears that as a plus b-squared, which is \
 the exact mistake this animation exists to correct. Use "all squared" every time \
-a bracket is raised to a power, including when you are stating the correct rule.
+a bracket is raised to a power, including when stating the correct rule.
 
-One idea per sentence. Short sentences. Use contractions. Write the way a person \
-talks, not the way a textbook reads.
+Use contractions and short sentences. Talk, do not recite. Punctuation is your
+only control over the voice, so put a comma where you want a breath and a full
+stop where you want a stop. Never use an em dash, an en dash, brackets, or a colon.
 
-Punctuation is your only control over the voice, so put a comma where you want a \
-breath and a full stop where you want a stop. Never use an em dash, an en dash, \
-brackets, or a colon.
+Do not describe the animation ("here we see", "on the left"). Say the maths.
 
-Do not narrate the animation ("here we see", "on the left"). Say the maths.
+Never tell the student their wrong answer was right, and never address them as
+though they are watching someone else's mistake.
 
-Never tell the student their wrong answer was right.
+Each beat gives a word target and a hard maximum, both derived from how long that
+beat is actually on screen. Aim for the target: coming in far under it leaves the
+animation playing in silence. Never exceed the maximum, or you will still be
+talking when the next beat starts.
 
-Each beat below gives you a word budget. It is derived from how long that beat \
-is actually on screen, so a line that runs over will be talking during the next \
-beat. Stay at or under the budget. Shorter is always safe.
-
-Their mistake: {rule}
-Stated for them as: {statement}
+The problem they were given: {problem}
+What they wrote: {work}
+The correct working: {solution}
+The false rule they used: {rule}
+Why it is wrong, in their terms: {statement}
+The specific evidence: {evidence}
 
 Beats, in order:
 {beats}
@@ -84,26 +109,59 @@ def _beat_brief(
 ) -> tuple[str, int]:
     duration = float(row["end_s"]) - float(row["start_s"])
     budget = speech.budget_words(duration, words_per_second, final=final)
+    target = speech.target_words(budget)
     marker = "  <- THIS BEAT SHOWS THE MISTAKE ITSELF" if row["targets_misconception"] else ""
     brief = (
         f'- {row["beat_id"]} "{_neutralize_markers(row["title"])}" '
-        f"({duration:.1f}s on screen, at most {budget} words): "
+        f"({duration:.1f}s on screen; aim for {target} words, hard maximum {budget}): "
         f"{_neutralize_markers(row['purpose'])}{marker}"
     )
     return brief, budget
 
 
 def build_prompt(
-    diagnosis_row: sqlite3.Row, beat_rows: list[sqlite3.Row], words_per_second: float
+    diagnosis_row: sqlite3.Row,
+    beat_rows: list[sqlite3.Row],
+    words_per_second: float,
+    *,
+    session_row: sqlite3.Row | None = None,
 ) -> str:
+    """Assemble the narration prompt.
+
+    Everything the diagnosis already knows goes in. The first version of this
+    passed only the rule name and a one-line statement, which is why it produced
+    captions rather than an explanation: it had nothing concrete to explain with.
+    The problem, the student's own working, the correct steps and the evidence are
+    all already persisted, and all of them are student-influenced text, so all of
+    them are neutralised before going anywhere near a prompt.
+    """
     briefs, ids = [], []
     for index, row in enumerate(beat_rows):
         brief, _ = _beat_brief(row, words_per_second, final=index == len(beat_rows) - 1)
         briefs.append(brief)
         ids.append(row["beat_id"])
+
+    payload = json.loads(diagnosis_row["payload_json"])
+    solution = _neutralize_markers(" ".join(payload.get("correct_solution", [])))
+    evidence = _neutralize_markers(" ".join(payload.get("evidence", []))) or "(none recorded)"
+
+    problem, work = "(not recorded)", "(not recorded)"
+    if session_row is not None:
+        problem = _neutralize_markers(session_row["problem"] or problem)
+        try:
+            steps = json.loads(session_row["student_work_json"] or "[]")
+        except (TypeError, ValueError):
+            steps = []
+        if steps:
+            work = _neutralize_markers(" ".join(str(s) for s in steps))
+
     return PROMPT.format(
+        problem=problem,
+        work=work,
+        solution=solution or "(not recorded)",
         rule=_neutralize_markers(diagnosis_row["buggy_rule"]),
         statement=_neutralize_markers(diagnosis_row["statement"]),
+        evidence=evidence,
         beats="\n".join(briefs),
         ids=", ".join(ids),
     )
@@ -165,7 +223,9 @@ async def write_script(
     if not timed:
         raise ValueError("session has no measured beat timings to narrate against")
 
-    prompt = build_prompt(diagnosis_row, timed, words_per_second)
+    prompt = build_prompt(
+        diagnosis_row, timed, words_per_second, session_row=repo.get_session(conn, session_id)
+    )
     script, meta = await client.complete_json(
         messages=[{"role": "user", "content": prompt}],
         schema=NarrationScript,

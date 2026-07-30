@@ -62,6 +62,12 @@ TERM_POWER = re.compile(r"([A-Za-z0-9]+)\s*\^\s*(\w+)")
 # all: there is no word boundary between the `a` and the `b`.
 COEFFICIENT = re.compile(r"\b(\d+)([A-Za-z]{1,4})\b")
 
+# "y plus three all squared" runs together into something a listener can parse
+# either way. The comma is the breath that makes the grouping audible, and it is
+# the whole difference between the correct reading and the misconception. The
+# prompt asks for it and the model drops it about a third of the time.
+UNCOMMAED_ALL = re.compile(r"(?<![,.])\s+all (squared|cubed)\b")
+
 # A minus sign between operands is subtraction; a leading one is negation.
 BINARY_MINUS = re.compile(r"(?<=[\w)])\s*-\s*(?=[\w(])")
 LEADING_MINUS = re.compile(r"(?<![\w)])-\s*(?=[\w(])")
@@ -129,6 +135,8 @@ def speakable(text: str) -> str:
     # says out loud mid-sentence.
     out = out.replace("(", ", ").replace(")", ", ")
 
+    out = UNCOMMAED_ALL.sub(lambda m: f", all {m.group(1)}", out)
+
     return pace(out)
 
 
@@ -169,5 +177,16 @@ def budget_words(duration_s: float, words_per_second: float, *, final: bool = Fa
     if final:
         usable = max(0.0, duration_s - 0.25) + FINAL_OVERRUN_ALLOWANCE_S
     else:
-        usable = max(0.0, duration_s - 0.55)
+        usable = max(0.0, duration_s - 0.35)
     return max(3, int(usable * words_per_second))
+
+
+def target_words(budget: int) -> int:
+    """What to aim for, given a hard maximum.
+
+    A cap on its own is a floor in practice: told only "at most N words", the model
+    writes a five-word caption and the animation plays in silence. Naming a target
+    as well is what makes it fill the time. 0.8 leaves room to land under the cap
+    without the line being clipped by `trim_to_budget`.
+    """
+    return max(3, int(budget * 0.8))
