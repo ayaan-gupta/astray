@@ -36,6 +36,47 @@ _LATEX_PROSE = {
 _SUPERSCRIPTS = str.maketrans("0123456789+-n", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿ")
 
 
+# Words that are mathematics even though they are made of letters. Left alone so
+# `\sin` and `\log` keep their upright maths shape rather than being re-wrapped.
+_MATH_WORDS = frozenset(
+    """sin cos tan sec csc cot sinh cosh tanh arcsin arccos arctan log ln exp lim
+    max min sup inf det gcd lcm mod deg dim ker arg""".split()
+)
+
+# A run of letters long enough to be a word, not preceded by a backslash (which
+# would make it a LaTeX command) and not inside braces we already wrote.
+_WORD = re.compile(r"(?<![\\A-Za-z{])([A-Za-z][A-Za-z']{2,})(\s*)")
+
+
+def mathify(line: str) -> str:
+    r"""Wrap prose words in `\text{}` so `MathTex` renders them as words.
+
+    Math mode has no spaces: every gap in the source is discarded and the glyphs
+    are set as a product of variables. So a line of prose handed to `MathTex` comes
+    out as one run of italics with the spaces gone. Live renders produced `Lety = 1`
+    and `Thestudent'srulefails` from "Let y = 1" and "The student's rule fails" --
+    both readable in the source, both unreadable on screen.
+
+    Only runs of three or more letters are wrapped. Shorter ones are the variables
+    this is protecting: `ab` must stay a product, and a lone `y` must stay italic.
+    That is also why the trailing whitespace goes *inside* the braces -- `\text{Let}
+    y` renders "Lety", because the space between the group and the variable is math
+    mode again.
+
+    `legend` solves the same problem a different way, by choosing `Text` over
+    `MathTex` for a whole label. That works for a label, which is one or the other.
+    A line is routinely both, and `\text{}` is how LaTeX says so.
+    """
+
+    def wrap(match: re.Match) -> str:
+        word, trailing = match.group(1), match.group(2)
+        if word.lower() in _MATH_WORDS:
+            return match.group(0)
+        return f"\\text{{{word}{' ' if trailing else ''}}}"
+
+    return _WORD.sub(wrap, line)
+
+
 def prose(text: str) -> str:
     r"""Render a caller-supplied sentence as plain text a reader can actually read.
 

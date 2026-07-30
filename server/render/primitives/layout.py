@@ -9,7 +9,7 @@ helpers scale-to-fit rather than trusting the caller's sizing.
 import re
 
 from manim import DOWN, LEFT, RIGHT, UP, FadeIn, FadeOut, Line, MathTex, Mobject, Text, VGroup
-from primitives.prose import prose
+from primitives.prose import mathify, prose
 
 # Manim's default frame is 8 units tall, 14.22 wide. Leaving a margin keeps text
 # clear of the edge on the 854x480 preview resolution the runner uses.
@@ -68,9 +68,9 @@ def safe_math(line, font_size: int = 40, color=None):
     if isinstance(line, Mobject):
         return line
     try:
-        return MathTex(line, font_size=font_size, color=color)
+        return MathTex(mathify(str(line)), font_size=font_size, color=color)
     except Exception:
-        return Text(str(line), font_size=max(font_size - 8, 18), color=color)
+        return Text(prose(str(line)), font_size=max(font_size - 8, 18), color=color)
 
 
 def math_lines(lines: list, font_size: int = 40) -> VGroup:

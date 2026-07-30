@@ -50,7 +50,10 @@ class AstrayScene(Scene):
             self.play(FadeOut(card))
 
         with beat(self, "b2"):
-            step_sequence(self, [r"(y+3)^2", r"= y^2 + 6y + 9"])
+            # Prose mixed into maths lines. A live render showed "Lety = 1" and
+            # "Thestudent'srulefails" from exactly this shape.
+            step_sequence(self, [r"Let y = 1", r"(y+3)^2 = y^2 + 6y + 9",
+                                 r"Your rule gives y^2 + 9"])
             self.wait(0.4)
 
         with beat(self, "b3"):

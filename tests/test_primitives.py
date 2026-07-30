@@ -54,7 +54,9 @@ def load_primitive(name: str):
 
 
 sampling = load_primitive("sampling")
-prose = load_primitive("prose").prose
+_prose_module = load_primitive("prose")
+prose = _prose_module.prose
+mathify = _prose_module.mathify
 MIN_GAP_SAMPLES = sampling.MIN_GAP_SAMPLES
 SAMPLES = sampling.SAMPLES
 defined_range = sampling.defined_range
@@ -281,6 +283,54 @@ class TestProse:
 
     def test_whitespace_is_collapsed(self):
         assert prose("a   b\n c") == "a b c"
+
+
+class TestMathify:
+    r"""Math mode has no spaces, so prose handed to `MathTex` loses them all.
+
+    Both broken inputs below are verbatim from a live render, which showed
+    `Lety = 1` and `Thestudent'srulefails` on screen.
+    """
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("Let y = 1", r"\text{Let }y = 1"),
+            ("Correct : (1+3)^2 = 16", r"\text{Correct }: (1+3)^2 = 16"),
+        ],
+    )
+    def test_prose_words_are_wrapped(self, raw, expected):
+        assert mathify(raw) == expected
+
+    def test_a_whole_sentence_keeps_every_space(self):
+        wrapped = mathify("The student's rule fails")
+        assert wrapped.count(r"\text{") == 4
+        assert "student's " in wrapped
+
+    @pytest.mark.parametrize("expression", ["y^2 + 6y + 9", "ab", "2ab", "x = 4", "a + b"])
+    def test_mathematics_is_left_alone(self, expression):
+        """Short letter runs are the variables this is protecting.
+
+        `ab` must stay a product and a lone `y` must stay italic, so only runs of
+        three or more letters are wrapped.
+        """
+        assert mathify(expression) == expression
+
+    @pytest.mark.parametrize("command", [r"\sin(x)", r"\log x", r"\frac{1}{2}", r"\cdot"])
+    def test_latex_commands_are_not_rewrapped(self, command):
+        assert mathify(command) == command
+
+    def test_a_bare_function_name_stays_upright(self):
+        """`sin` written without its backslash is still mathematics, not a word."""
+        assert mathify("sin(x) + cos(x)") == "sin(x) + cos(x)"
+
+    def test_the_trailing_space_goes_inside_the_braces(self):
+        r"""`\text{Let} y` renders "Lety": outside the braces it is math mode again."""
+        assert r"\text{Let }" in mathify("Let y = 1")
+        assert r"\text{Let} " not in mathify("Let y = 1")
+
+    def test_a_word_at_the_end_needs_no_trailing_space(self):
+        assert mathify("total") == r"\text{total}"
 
 
 class FakeScene:
