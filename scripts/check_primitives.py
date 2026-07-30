@@ -116,6 +116,72 @@ class AstrayScene(Scene):
             self.wait(0.4)
 """
 
+SPACE_SCENE = """
+import numpy as np
+from manim import ThreeDScene
+
+from primitives.beats import beat
+from primitives.space import composition_lift, gap_pillars, pace_marks, rule_surfaces
+
+
+class AstraySpaceScene(ThreeDScene):
+    def construct(self):
+        with beat(self, "b1"):
+            # The freshman's dream as two surfaces. They touch exactly along the
+            # two axes, which is why the rule feels right.
+            surfaces = rule_surfaces(
+                self,
+                lambda a, b: (a + b) ** 2,
+                lambda a, b: a**2 + b**2,
+                u_range=(0.0, 3.0),
+                v_range=(0.0, 3.0),
+                correct_label=r"(y+3)^2",
+                wrong_label=r"y^2+9",
+                orbit_seconds=2.0,
+            )
+
+        with beat(self, "b2"):
+            gap_pillars(
+                self,
+                surfaces,
+                lambda a, b: (a + b) ** 2,
+                lambda a, b: a**2 + b**2,
+                [(1.0, 3.0)],
+            )
+
+        with beat(self, "b3"):
+            # A surface undefined over part of its own rectangle, which is the
+            # shape a student's rule usually arrives in.
+            rule_surfaces(
+                self,
+                lambda a, b: np.log(a + b),
+                lambda a, b: np.log(a) + np.log(b),
+                u_range=(-1.0, 3.0),
+                v_range=(-1.0, 3.0),
+                orbit_seconds=1.0,
+            )
+
+        with beat(self, "b4"):
+            lift = composition_lift(
+                self,
+                lambda x: x**2,
+                lambda u: np.sin(u),
+                x_range=(-2.0, 2.0),
+                orbit_seconds=2.0,
+            )
+
+        with beat(self, "b5"):
+            pace_marks(self, lift, lambda x: x**2, x_range=(-2.0, 2.0))
+"""
+
+SPACE_BEATS = [
+    ("b1", "two rules as two surfaces"),
+    ("b2", "the gap, as a length"),
+    ("b3", "a surface with a domain hole"),
+    ("b4", "composition lifted into space"),
+    ("b5", "equal x steps, unequal u steps"),
+]
+
 BEATS = [
     ("b1", "title card"),
     ("b2", "step sequence"),
@@ -128,39 +194,43 @@ BEATS = [
 ]
 
 
-async def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default="media/_primitive_check")
-    args = parser.parse_args()
+PASSES = {
+    "flat": (SCENE, BEATS, "AstrayScene"),
+    "space": (SPACE_SCENE, SPACE_BEATS, "AstraySpaceScene"),
+}
 
-    settings = get_settings()
+
+async def check(name: str, out: Path, settings) -> int:
+    """Validate, render and sample one pass. Returns a shell exit code."""
+    scene_code, beats, class_name = PASSES[name]
     board = Storyboard(
         beats=[
             Beat(id=bid, title=title, teaching_purpose=title, on_screen=title, primitive="custom")
-            for bid, title in BEATS
+            for bid, title in beats
         ],
         total_estimated_seconds=40,
     )
 
-    report = validate(SCENE, board, "AstrayScene")
+    report = validate(scene_code, board, class_name)
     if not report.ok:
         for issue in report.issues:
             print(f"  validator: {issue.kind}: {issue.detail}")
         return 1
-    print("validator ok")
+    print(f"[{name}] validator ok")
 
-    paths = runner.prepare(Path(settings.media_root), "_primitive_check", SCENE, attempt=1)
-    result = await runner.run(paths, "AstrayScene", timeout_s=settings.render_timeout_s)
+    paths = runner.prepare(
+        Path(settings.media_root), f"_primitive_check_{name}", scene_code, attempt=1
+    )
+    result = await runner.run(paths, class_name, timeout_s=settings.render_timeout_s)
     if not result.ok:
-        print(f"render FAILED\n{(result.error_text or '')[-3000:]}")
+        print(f"[{name}] render FAILED\n{(result.error_text or '')[-3000:]}")
         return 1
 
-    print(f"render ok in {result.duration_s:.1f}s -> {result.video_path}")
-    out = Path(args.out)
+    print(f"[{name}] render ok in {result.duration_s:.1f}s -> {result.video_path}")
     out.mkdir(parents=True, exist_ok=True)
 
     timings = {t.id: t for t in result.timings}
-    for bid, title in BEATS:
+    for bid, title in beats:
         span = timings.get(bid)
         if span is None:
             print(f"  {bid}: no timing recorded")
@@ -184,8 +254,22 @@ async def main() -> int:
             ],
             check=True,
         )
-        print(f"  {bid}  {span.start:6.2f}-{span.end:6.2f}s  {title:<24} {target}")
+        print(f"  {bid}  {span.start:6.2f}-{span.end:6.2f}s  {title:<28} {target}")
     return 0
+
+
+async def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", default="media/_primitive_check")
+    parser.add_argument("--pass", dest="passes", action="append", choices=sorted(PASSES))
+    args = parser.parse_args()
+
+    settings = get_settings()
+    out = Path(args.out)
+    status = 0
+    for name in args.passes or sorted(PASSES):
+        status |= await check(name, out / name, settings)
+    return status
 
 
 if __name__ == "__main__":

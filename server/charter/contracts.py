@@ -201,7 +201,13 @@ class Beat(BaseModel):
     # ownership. `balance` is gone rather than built -- equation solving is already
     # served well by `algebra_steps`, and an option nothing can render is worse
     # than an option that does not exist.
-    primitive: Literal["numberline", "areamodel", "algebra_steps", "graph", "custom"]
+    # `surface` and `lift` are the two spatial builders (`primitives/space.py`).
+    # A beat choosing either commits the whole scene to a `ThreeDScene` -- one
+    # camera serves the file -- so s7 is told to declare that base class whenever
+    # any beat is spatial, and s8 refuses the combination if it does not.
+    primitive: Literal[
+        "numberline", "areamodel", "algebra_steps", "graph", "surface", "lift", "custom"
+    ]
 
 
 class Storyboard(BaseModel):

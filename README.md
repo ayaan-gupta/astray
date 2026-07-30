@@ -31,6 +31,39 @@ When the work is already correct, Astray says so and stops: the session ends at
 make is treated as exactly as bad as missing a real one, and a "you were right"
 result must never enter their misconception history.
 
+## The pipeline is Math-To-Manim's, with a diagnosis in front
+
+The reasoning chain is
+[Math-To-Manim](https://github.com/HarleyCoops/Math-To-Manim)'s reverse knowledge
+tree, stage for stage. Upstream expands a short question into a teaching plan and
+then into a scene; Astray does the same, having first worked out what this
+particular student got wrong.
+
+| Math-To-Manim | Astray | Artifact |
+|---|---|---|
+| — | `s0_ingest`, `s1_diagnose` | the falsifiable diagnosis |
+| `IntentAgent` | `s2_intent` | `IntentAnalysis` |
+| `PrerequisiteGraphAgent` | `s3_prereq` | `PrerequisiteGraph` |
+| `CurriculumAgent` | `s4_curriculum` | `CurriculumPlan` |
+| `MathAgent` | `s5_math` | `MathContent` |
+| `StoryboardAgent` | `s6_visual` | `Storyboard` |
+| `SceneSpecAgent` + `ManimCodeAgent` | `s7_scene` | `SceneCode` |
+| `StaticReviewAgent` | `s8_validate` | `ValidationReport` |
+| `RenderAgent` | `server/render/runner.py` | `RenderResult` |
+| `ManimCodeAgent.repair()` | `server/render/repair.py` | a bounded repair loop |
+
+Every stage is a typed Pydantic artifact persisted to `run_artifacts` with its own
+token count and cost, which is upstream's "keep LLM output reviewable by emitting
+intermediate artifacts before code" made durable rather than written to a run
+directory.
+
+Three things are ours. The chain starts from a **diagnosis** rather than a
+question, so every later stage is told what this student believes rather than what
+the topic is. Scene code is executed in a **sandboxed container behind an AST
+allow-list**, because the prompt chain begins with untrusted student text. And the
+beats the storyboard plans are a **grounding contract** the validator enforces, so
+the chat tutor can cite a moment in the video and land on it.
+
 ## Design commitments
 
 **The diagnosis is falsifiable.** Every diagnosis carries a SymPy expression
@@ -95,6 +128,30 @@ errors that are an *absence*, where nothing exists to cross out. `balance` was
 removed rather than built, because equation solving is already served by
 `algebra_steps` and an option nothing can render is worse than an option that does
 not exist.
+
+**Two of the builders work in three dimensions**, because two of the commonest
+misconceptions are claims about shape rather than about value.
+
+`surface` draws both rules as two sheets over the same square of inputs, with the
+camera orbiting them. For `(a+b)^2 -> a^2 + b^2` the two sheets *touch along the
+two axes* and separate everywhere else, so the frame says something a derivation
+cannot: the rule is exactly right whenever one term is zero, which is why it feels
+right, and the gap elsewhere is a solid object with a size. Its partner
+`gap_pillars` puts a bar between the sheets at the student's own numbers and reads
+off all three — theirs, the truth, the difference.
+
+`lift` gives a composition its middle quantity as an axis. `sin(x²)` becomes one
+curve in space whose three shadows are the three stages: `u = x²` on the floor,
+`sin(u)` up the wall, the answer on the back. Its partner `pace_marks` steps
+evenly along `x` and shows the unequal steps those become in `u` — which is the
+`2x` a dropped chain-rule factor leaves out, seen rather than asserted.
+
+Reaching for either commits the file to a `ThreeDScene`, since there is one camera
+per scene. That is enforced statically rather than requested: a plain `Scene` that
+imports `primitives.space` fails validation before a container starts, because the
+degraded result — surfaces flattened head-on, the near one hiding the far one — is
+a bad video rather than a failed render, and a bad video is the outcome with no
+feedback path.
 
 Which one wins is a property of the misconception. `(a+b)^2 -> a^2 + b^2` survives
 a derivation, because a student who believes it watches the correct expansion,
@@ -292,7 +349,7 @@ with KaTeX in the review field.
 ## Development
 
 ```bash
-uv run pytest          # 530 tests; no network and no Docker — both are mocked
+uv run pytest          # 597 tests; no network and no Docker — both are mocked
 uv run ruff check .
 uv run ruff format --check .
 uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model
@@ -309,6 +366,7 @@ inside the render image:
 
 ```bash
 uv run python scripts/check_primitives.py            # every primitive, one frame each
+uv run python scripts/check_primitives.py --pass space   # just the 3D ones
 uv run python scripts/run_session.py --preset binomial   # a whole session, real calls
 uv run python scripts/seed_chat.py <session-id>      # grounded chat for a demo
 ```

@@ -64,6 +64,9 @@ guard = sampling.guard
 decimal_places = sampling.decimal_places
 tick_step = sampling.tick_step
 y_window = sampling.y_window
+z_window = sampling.z_window
+guard2 = sampling.guard2
+surface_grid = sampling.surface_grid
 
 
 def _modules() -> list[Path]:
@@ -452,3 +455,51 @@ class TestGuard:
 
     def test_samples_enough_points_to_see_a_narrow_feature(self):
         assert SAMPLES >= 100
+
+
+class TestSurfaceWindow:
+    """`z_window` sizes the box both surfaces are drawn in.
+
+    One shared window, not one per sheet, is the whole point: two sheets scaled
+    separately would sit at the same apparent height, which denies the only thing
+    a `surface` beat exists to show.
+    """
+
+    def test_holds_the_taller_surface(self):
+        lo, hi = z_window(
+            [lambda a, b: (a + b) ** 2, lambda a, b: a**2 + b**2], (0.0, 3.0), (0.0, 3.0)
+        )
+        assert lo <= 0.0
+        assert hi >= 36.0
+
+    def test_a_surface_undefined_everywhere_still_gives_a_usable_box(self):
+        """A student's rule can miss its domain entirely; an Axes of zero height cannot."""
+        lo, hi = z_window([lambda a, b: math.log(-1 - a - b)], (0.0, 1.0), (0.0, 1.0))
+        assert hi > lo
+
+    def test_a_flat_surface_does_not_collapse_the_box(self):
+        lo, hi = z_window([lambda a, b: 7.0], (0.0, 1.0), (0.0, 1.0))
+        assert hi - lo > 0.5
+
+    def test_a_pole_is_still_discarded(self):
+        """A pole in two variables is a whole line of bad samples, not one point.
+
+        `1/(a+b)` is singular along the entire diagonal of the rectangle, so the
+        trim has to be wide enough to swallow a full row of the grid.
+        """
+        _, hi = z_window([lambda a, b: 1.0 / (a + b)], (-1.0, 1.0), (-1.0, 1.0))
+        assert hi < 1e3
+
+    def test_the_grid_is_coarse_enough_to_stay_cheap(self):
+        """Two surfaces are sampled twice each per beat, in pure Python."""
+        assert len(surface_grid(0.0, 1.0, 21)) == 21
+        assert surface_grid(0.0, 1.0, 21)[-1] == 1.0
+
+
+class TestGuard2:
+    def test_clamps_a_two_argument_function(self):
+        assert guard2(lambda a, b: 1000.0, -2.0, 2.0)(0.0, 0.0) == 2.0
+
+    def test_a_domain_hole_becomes_the_ceiling_not_a_crash(self):
+        """Manim samples a surface directly, so one nan ends the render."""
+        assert guard2(lambda a, b: math.log(a + b), -2.0, 2.0)(-1.0, 0.0) == 2.0

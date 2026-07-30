@@ -31,6 +31,17 @@ from server.charter.contracts import SceneCode, Storyboard, ValidationIssue, Val
 # allow-list exists to avoid making case by case.
 ALLOWED_IMPORT_ROOTS = frozenset({"manim", "numpy", "np", "math", "primitives"})
 
+# The spatial primitives orient a camera, pin a legend to the frame and rotate
+# the scene. None of those exist on a flat `Scene`, so `primitives.space` degrades
+# to a fixed head-on projection there: the surfaces still draw, stacked so that
+# the near one hides the far one, which is the one relationship the beat exists
+# to show. That is a bad video rather than a failed render, and a bad video is
+# the outcome with no feedback path -- it renders, it is recorded as a success,
+# and nobody finds out until someone watches it. Catching it here turns it into a
+# validation issue the repair loop can act on, with the fix named in the message.
+SPATIAL_MODULE = "primitives.space"
+SPATIAL_BASE = "ThreeDScene"
+
 # Names that are dangerous even without an import: builtins reachable from any
 # scope. `__import__` and `eval`/`exec`/`compile` reconstruct the import system;
 # `open` reaches the filesystem; `globals`/`vars`/`locals` walk to everything else.
@@ -92,10 +103,12 @@ def validate(code: str, storyboard: Storyboard, scene_class_name: str) -> Valida
         )
 
     beat_ids: list[str] = []
+    spatial = False
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
+                spatial = spatial or alias.name.startswith(SPATIAL_MODULE)
                 if alias.name.split(".")[0] not in ALLOWED_IMPORT_ROOTS:
                     issues.append(
                         ValidationIssue(
@@ -105,6 +118,7 @@ def validate(code: str, storyboard: Storyboard, scene_class_name: str) -> Valida
                         )
                     )
         elif isinstance(node, ast.ImportFrom):
+            spatial = spatial or (node.module or "").startswith(SPATIAL_MODULE)
             root = (node.module or "").split(".")[0]
             # `from . import x` (level > 0) has no module root to check and would
             # otherwise slip through as an empty string.
@@ -139,6 +153,8 @@ def validate(code: str, storyboard: Storyboard, scene_class_name: str) -> Valida
         # plain Call above, so `with` needs no separate handling.
 
     issues.extend(_structure_issues(tree, scene_class_name))
+    if spatial:
+        issues.extend(_spatial_issues(tree))
     issues.extend(_beat_issues(beat_ids, storyboard))
 
     return ValidationReport(ok=not issues, issues=issues)
@@ -159,6 +175,45 @@ def _beat_id_of(node: ast.Call) -> str | None:
     return None
 
 
+def _base_names(node: ast.ClassDef) -> list[str]:
+    names = []
+    for base in node.bases:
+        if isinstance(base, ast.Name):
+            names.append(base.id)
+        elif isinstance(base, ast.Attribute):
+            names.append(base.attr)
+    return names
+
+
+def _scene_defs(tree: ast.Module) -> list[ast.ClassDef]:
+    return [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and any(name.endswith("Scene") for name in _base_names(node))
+    ]
+
+
+def _spatial_issues(tree: ast.Module) -> list[ValidationIssue]:
+    """A scene reaching for `primitives.space` must be a `ThreeDScene`.
+
+    Checked only when the spatial module is actually imported, so nothing here
+    constrains the flat beats that make up most animations.
+    """
+    return [
+        ValidationIssue(
+            kind="structure",
+            detail=(
+                f"{SPATIAL_MODULE} needs a camera: declare the scene as "
+                f"class {scene.name}({SPATIAL_BASE}), not {', '.join(_base_names(scene))}"
+            ),
+            line=scene.lineno,
+        )
+        for scene in _scene_defs(tree)
+        if not any(name.endswith(SPATIAL_BASE) for name in _base_names(scene))
+    ]
+
+
 def _structure_issues(tree: ast.Module, scene_class_name: str) -> list[ValidationIssue]:
     """Exactly one Scene subclass, named as the contract specifies.
 
@@ -166,16 +221,7 @@ def _structure_issues(tree: ast.Module, scene_class_name: str) -> list[Validatio
     make which one renders depend on manim's discovery order, and zero means the
     render fails inside the container instead of here.
     """
-    scenes = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef)
-        and any(
-            (isinstance(base, ast.Name) and base.id.endswith("Scene"))
-            or (isinstance(base, ast.Attribute) and base.attr.endswith("Scene"))
-            for base in node.bases
-        )
-    ]
+    scenes = _scene_defs(tree)
     if not scenes:
         return [ValidationIssue(kind="structure", detail="no Scene subclass found")]
     if len(scenes) > 1:

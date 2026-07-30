@@ -163,6 +163,109 @@ def guard(fn, lo: float, hi: float):
     return guarded
 
 
+def surface_grid(lo: float, hi: float, count: int) -> list[float]:
+    """`count` evenly spaced abscissae across [lo, hi].
+
+    Coarser than `grid` on purpose. A surface is sampled in two dimensions, so the
+    240 samples a curve uses would be 57,600 evaluations per surface and two
+    surfaces per beat -- seconds of pure Python before Manim draws anything.
+    """
+    if count < 2:
+        return [lo]
+    step = (hi - lo) / (count - 1)
+    return [lo + index * step for index in range(count)]
+
+
+def finite_values_2d(
+    fn, u_range: tuple[float, float], v_range: tuple[float, float], count: int = 21
+):
+    """Finite values of a two-argument `fn` over the sample grid.
+
+    Same contract as `finite_values`: an expression undefined on part of its
+    rectangle is normal (`\\log(u+v)` over a rectangle straddling `u+v = 0`), so
+    failures and infinities are dropped rather than raised.
+    """
+    values = []
+    for u in surface_grid(*u_range, count):
+        for v in surface_grid(*v_range, count):
+            try:
+                value = float(fn(u, v))
+            except Exception:
+                continue
+            if math.isfinite(value):
+                values.append(value)
+    return values
+
+
+# The fraction trimmed from each end before a surface's spread is measured.
+# Much wider than `TRIM`, because a singularity in two variables is a curve
+# rather than a point: `1/(a+b)` is bad along the whole diagonal of its
+# rectangle, which is one full row of the grid, so roughly `1/count` of every
+# sample. At count = 21 that is 4.8%, and a 3% trim leaves the pole in charge of
+# the scale. 8% clears a row with room to spare.
+SURFACE_TRIM = 0.08
+
+
+def z_window(
+    functions,
+    u_range: tuple[float, float],
+    v_range: tuple[float, float],
+    pad: float = 0.1,
+) -> tuple[float, float]:
+    """A z window holding every surface, shared across all of them.
+
+    Shared rather than computed per surface, for the reason the whole primitive
+    exists: two sheets scaled separately would sit at the same apparent height,
+    denying the one thing the frame is for.
+
+    The extreme is kept unless it is an outlier, and that is the difference from
+    `y_window`. A curve's peak is usually somewhere in the middle of the window,
+    so trimming the top few samples costs nothing; a surface's peak is at a corner
+    of the rectangle, and it is the corner the argument is about. Trimming flat
+    cut the top off `(a+b)^2` over `0..3` at 28.6 against a true 36, which draws
+    the maximum divergence -- the whole point of the beat -- as a plateau clamped
+    against the ceiling. So the trimmed bound is used only to measure the spread,
+    and the real extreme is kept whenever it lies within one spread of it. A pole
+    does not: `1/(a+b)` puts a sample near the domain edge many orders of
+    magnitude out, and that one is still discarded.
+    """
+    values: list[float] = []
+    for fn in functions:
+        values.extend(finite_values_2d(fn, u_range, v_range))
+    if not values:
+        return (-1.0, 1.0)
+
+    values.sort()
+    cut = int(len(values) * SURFACE_TRIM)
+    trimmed = values[cut : len(values) - cut] or values
+    lo, hi = trimmed[0], trimmed[-1]
+    spread = max(hi - lo, 1e-6)
+    if values[-1] - hi <= spread:
+        hi = values[-1]
+    if lo - values[0] <= spread:
+        lo = values[0]
+
+    if hi - lo < 1e-6:
+        lo, hi = lo - 1.0, hi + 1.0
+    margin = (hi - lo) * pad
+    return (lo - margin, hi + margin)
+
+
+def guard2(fn, lo: float, hi: float):
+    """A two-argument `guard`. Manim samples a surface directly; this never raises."""
+
+    def guarded(u, v):
+        try:
+            value = float(fn(u, v))
+        except Exception:
+            return hi
+        if math.isnan(value):
+            return hi
+        return max(lo, min(hi, value))
+
+    return guarded
+
+
 def decimal_places(step: float) -> int:
     """How many decimals a tick label needs, given the step between ticks.
 

@@ -28,6 +28,7 @@ from primitives.beats import beat
 from primitives.graph import compare_functions, mark_divergence
 from primitives.layout import caption, math_lines, title_card
 from primitives.numberline import missing_roots
+from primitives.space import composition_lift, gap_pillars, pace_marks, rule_surfaces
 
 __all__ = [
     "area_totals",
@@ -37,10 +38,14 @@ __all__ = [
     "compare_areas",
     "compare_functions",
     "compare_rules",
+    "composition_lift",
+    "gap_pillars",
     "mark_divergence",
     "math_lines",
     "missing_area",
     "missing_roots",
+    "pace_marks",
+    "rule_surfaces",
     "step_sequence",
     "title_card",
 ]

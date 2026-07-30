@@ -25,7 +25,12 @@ class Settings(BaseSettings):
     render_enabled: bool = True
     render_timeout_s: int = 300
     render_max_repairs: int = 2
-    llm_timeout_s: int = 240
+    # Raised from 240 after s7 began timing out. Scene composition is the one
+    # stage whose output is a whole file rather than a paragraph, and a spatial
+    # storyboard makes it longer still -- the reasoning model spent past four
+    # minutes on it and the read timed out, which surfaces as an empty-detail
+    # "transport failure" and loses a run that was still working.
+    llm_timeout_s: int = 420
     llm_max_retries: int = 2
 
     # Narration. Written after the render, never before: the script is budgeted

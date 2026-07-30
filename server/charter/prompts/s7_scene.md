@@ -129,6 +129,63 @@ the primitive the beat's `primitive` field names.
         ones they missed. When the error is an absence (`x^2 = 16 -> x = 4`) there
         is nothing to cross out, so this replaces `compare_rules`.
 
+### Three dimensions -- `from primitives.space import ...`
+
+**Using anything from this module makes the scene a `ThreeDScene`.** Write
+`class YourSceneName(ThreeDScene):` and import `ThreeDScene` from `manim`. There
+is one camera per file, so this is a decision about the whole scene, not about one
+beat -- and it is checked statically: a plain `Scene` that imports
+`primitives.space` fails validation before the render starts. The flat helpers all
+work unchanged inside a `ThreeDScene`, so mixing beats is safe and expected.
+
+    rule_surfaces(scene, correct, wrong,
+                  u_range: tuple[float, float] = (-2.0, 2.0),
+                  v_range: tuple[float, float] = (-2.0, 2.0),
+                  correct_label: str = "the truth",
+                  wrong_label: str = "your rule",
+                  orbit_seconds: float = 3.5) -> VGroup
+        The two rules as two surfaces over one square of inputs, with the camera
+        orbiting them. `correct` and `wrong` are CALLABLES OF TWO ARGUMENTS: write
+        `lambda a, b: (a + b) ** 2` against `lambda a, b: a ** 2 + b ** 2`. Choose
+        an input window that contains the student's own numbers. Unpacks as
+        `axes, right, left`, and the whole return value is what `gap_pillars`
+        wants. The labels are LaTeX and go in the key, so pass the real
+        expressions: `correct_label=r"(y+3)^2"`, `wrong_label=r"y^2+9"`.
+
+    gap_pillars(scene, surfaces, correct, wrong, points,
+                correct_label: str = "the truth",
+                wrong_label: str = "your rule") -> VGroup
+        A bar between the two sheets at each `(a, b)` in `points`, with both
+        readings and the difference along the bottom. Pass what `rule_surfaces`
+        returned and the same two callables. Use the student's own values, so the
+        bar is the number they wrote against the number they should have.
+
+    composition_lift(scene, inner, outer,
+                     x_range: tuple[float, float] = (-2.0, 2.0),
+                     orbit_seconds: float = 3.5) -> VGroup
+        A composition as one curve in space with each stage as one of its shadows.
+        `inner` and `outer` are CALLABLES OF ONE ARGUMENT: for `sin(x^2)` pass
+        `lambda x: x ** 2` and `lambda u: np.sin(u)`, in that order. Unpacks as
+        `axes, lifted, floor, wall, back`, and the whole return value is what
+        `pace_marks` wants.
+
+    pace_marks(scene, lift, inner, x_range=(-2.0, 2.0), count: int = 9) -> VGroup
+        Equal steps along `x` carried up to the inner curve and across, so the
+        unequal steps they become are visible. This is the dropped factor, drawn.
+        Pass what `composition_lift` returned and the same `inner`.
+
+**The second helper of each pair may have its own beat.** `gap_pillars` and
+`pace_marks` put back whatever the beat boundary faded, so
+`with beat(self, "b3"): gap_pillars(self, surfaces, ...)` draws onto the surfaces
+rather than onto black. Keep the returned value in a variable across the two
+beats.
+
+**Do not orient the camera yourself.** No `set_camera_orientation`,
+`move_camera`, `begin_ambient_camera_rotation` or `add_fixed_in_frame_mobjects` in
+generated code: each helper stages its own shot and turns the camera back off
+afterwards, and a hand-set angle left over from one beat silently reframes every
+beat after it.
+
 ### Layout -- `from primitives.layout import ...`
 
     title_card(text: str, subtitle: str = "") -> VGroup

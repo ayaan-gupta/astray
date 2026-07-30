@@ -72,8 +72,13 @@ def main() -> int:
         media = Path(settings.media_root) / row["id"]
         print(f"  {row['id']}  {row['handle']:<18} {counts}{'  +media' if media.exists() else ''}")
 
-    live = {row["id"] for row in keep}
-    orphans = _orphan_media(Path(settings.media_root), live)
+    # Sessions being dropped count as known, not orphaned. Their media is removed
+    # by the drop loop below, and listing it here as well both double-counts it in
+    # the dry run and, with --apply, tries to remove the same directory twice --
+    # the second `rmtree` raised FileNotFoundError and took the script's summary
+    # line with it, after the deletions had already happened.
+    known = {row["id"] for row in keep} | {row["id"] for row in drop}
+    orphans = _orphan_media(Path(settings.media_root), known)
     if orphans:
         print(f"\norphaned media, no session row ({len(orphans)}):")
         for path in orphans:

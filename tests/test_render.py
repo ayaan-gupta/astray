@@ -72,6 +72,45 @@ def test_hostile_code_is_rejected(code, kind):
     assert any(issue.kind == kind for issue in report.issues), report.failure_text()
 
 
+def _spatial_scene(base: str) -> str:
+    return (
+        "from manim import *\n"
+        "from primitives.beats import beat\n"
+        "from primitives.space import rule_surfaces\n"
+        f"class AstrayScene({base}):\n"
+        "    def construct(self):\n" + CLEAN_BODY
+    )
+
+
+def test_spatial_primitives_require_a_three_d_scene():
+    report = validate(_spatial_scene("Scene"), _storyboard(), "AstrayScene")
+    assert not report.ok
+    issue = next(i for i in report.issues if i.kind == "structure")
+    # The message has to name the fix, because its only reader is the repair loop.
+    assert "ThreeDScene" in issue.detail
+
+
+def test_a_three_d_scene_may_use_the_spatial_primitives():
+    assert validate(_spatial_scene("ThreeDScene"), _storyboard(), "AstrayScene").ok
+
+
+def test_a_flat_scene_is_left_alone():
+    """The rule fires on the import, not on every scene: flat beats stay flat."""
+    assert validate(_scene(CLEAN_BODY), _storyboard(), "AstrayScene").ok
+
+
+def test_import_module_form_also_triggers_the_camera_rule():
+    """`import primitives.space` reaches the same helpers as `from ... import`."""
+    code = (
+        "from manim import *\n"
+        "from primitives.beats import beat\n"
+        "import primitives.space\n"
+        "class AstrayScene(Scene):\n"
+        "    def construct(self):\n" + CLEAN_BODY
+    )
+    assert not validate(code, _storyboard(), "AstrayScene").ok
+
+
 def test_missing_beat_fails_the_gate():
     """Grounding cannot degrade silently: an unwrapped beat is a citation that
     would seek nowhere."""

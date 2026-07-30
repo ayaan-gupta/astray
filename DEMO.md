@@ -9,58 +9,105 @@ uv run uvicorn server.app:create_app --factory --port 8000
 
 ## The golden case
 
-**`(y + 3)^2` → `y^2 + 9`** — session `84b52e28-05dd-4a33-a295-e3a3b6c167e7`
+**`(y + 3)^2` → `y^2 + 9`** — session `fa8f9e92-220d-4345-b9e5-484a228fb6ff`
 
-<http://localhost:8000/#/session/84b52e28-05dd-4a33-a295-e3a3b6c167e7>
+<http://localhost:8000/#/session/fa8f9e92-220d-4345-b9e5-484a228fb6ff>
 
-Status `ready`, 33.8s narrated video, five beats with timings measured by the
-container's own clock:
+Status `ready`, 38.0s narrated video, four beats. The beats were timed by the
+container's own clock and then each was held open for as long as its spoken line
+needed (see *The video fits the explanation* below); these are the published
+timings, which are what the rail seeks to:
 
 | Beat | Title | Primitive | Start |
 |---|---|---|---|
-| b1 | Student's rule | `algebra_steps` | 0:00 |
-| b2 | Number check | `algebra_steps` | 0:07 |
-| **b3** | **Area model** | **`areamodel`** | **0:13** |
-| b4 | Correct expansion | `algebra_steps` | 0:19 |
-| b5 | Comparison | `algebra_steps` | 0:27 |
+| b1 | Correct expansion | `algebra_steps` | 0:00 |
+| b2 | Area model | `areamodel` | 0:08 |
+| **b3** | **3D surfaces** | **`surface`** | **0:18** |
+| **b4** | **Concrete gap** | **`surface`** | **0:30** |
 
-**b3 is the frame to hold on.** Two squares of side (1+3) side by side. The left
-one is tiled completely, `1²` and `3²` in blue with the two `1·3` rectangles in
-yellow, and totals `(1+3)² = 16`. The right one is the same size with the two
-rectangles left as dashed holes, and totals `1² + 3² = 10`. The student's rule does
-not produce a *different* square; it produces a square with something missing, and
-the six units of missing area are visible.
+**b3 and b4 are the frames to hold on**, and they are one argument in two halves.
 
-The cells are drawn to their real proportions, so `1²` is a small corner and `3²`
-is a large one. That is the whole reason the picture argues anything: a schematic
-diagram with arbitrary sizes would show the same four labels while giving up the
-only thing a picture adds over a derivation.
+b3 puts both rules in the same space: `(a+b)²` in green and `a²+b²` in red, drawn
+as two surfaces over the same square of inputs, with the camera orbiting them. The
+two sheets **touch along the two axes** and separate everywhere else, which is the
+part a derivation cannot say: the student's rule is not merely wrong, it is exactly
+right whenever `a` or `b` is zero, and that is why it feels right. Every case they
+have ever checked it on was probably one of those.
+
+b4 turns the picture into a number. A yellow bar rises between the two sheets at
+the student's own values, and the bottom of the frame reads
+`a²+b²: 10 · (a+b)²: 16 · missing: 6`. The bar is the six they dropped, at the
+height it actually has.
+
+The area model in b2 stays because the two beats do different jobs: the square
+**counts** the missing terms, the surfaces **measure** them. Neither replaces the
+other and the video is stronger for having both.
 
 ## The golden video is narrated
 
-One voice throughout, five lines, on `s2.1-pro-free`. **Play it with sound on.**
+One voice throughout, four lines, on `s2.1-pro-free`. **Play it with sound on.**
 The untouched render is kept beside it as `silent.mp4`.
 
 Read end to end, which is how it was written:
 
-> You thought a plus b, all squared, equals a squared plus b squared. For y equals
-> one, your rule gives ten, but the true answer is sixteen. An area model shows the
-> missing terms: two rectangles of three y each. Multiply y plus three by itself
-> gives y squared, plus two times three y, plus nine. So your answer is y squared
-> plus nine, missing the middle term six y.
+> You thought squaring a bracket means squaring each term, but it doesn't. That's
+> why the middle term appears: two rectangles in the square of side a plus b make
+> two a b. So the missing term changes the surface shape. At y equals one, your
+> value is ten, the correct is sixteen, and the six missing is exactly that middle
+> term.
 
-It **names what is on screen** rather than restating the algebra: "two rectangles
-of three y each" over the beat that draws exactly those two rectangles. That is a
-consequence of the beats being long enough to say something, not of better
-prompting: a word budget comes from a beat's measured duration, and every beat now
-has a five second floor.
+Two properties to listen for, both of which the first version of this got wrong.
+
+**It never states the student's rule without denying it in the same breath.** The
+earlier script opened *"You thought a plus b, all squared, equals a squared plus b
+squared."* and then moved on to numbers. Said out loud with nothing after it, that
+sentence reads the student's own mistake back to them as fact, and the video has
+taught them the error. Now the contradiction is attached: *"but that's the mistake;
+it leaves out the middle term."*
+
+**Every line reaches back to the one before it.** "That's why", "So", "At". The
+animation cuts between sections and the voice is the only thing carrying the
+student across the cut; without those joins, four beats sound like four separate
+videos.
+
+It also **names what is on screen** rather than restating the algebra: "two
+rectangles in the square of side a plus b" over the beat that draws exactly those
+rectangles, and "the six missing" over the beat that draws the bar.
+
+## The video fits the explanation, not the reverse
+
+Until recently the script was the thing that gave way: a beat's word budget came
+from its measured duration, so a 6-second beat got sixteen words, and sixteen words
+cannot state a rule, contradict it, and give the reason. The script wrote the label
+instead. The animation was not under-narrated — it was too short to be explained
+over. The chain-rule session below carries 114 spoken words, which is around
+45 seconds of speech, against a 40s render.
+
+So each beat is now **held open on its own last frame** for exactly as long as its
+line needs. The picture is untouched and nothing is stretched or sped up; the video
+grows only at beat boundaries, where nothing is moving.
+
+| Session | Render | Published | Held |
+|---|---|---|---|
+| `(y+3)^2` | 35.6s | 38.0s | +2.4s |
+| `d/dx sin(x^2)` | 40.0s | 44.9s | +4.9s |
+
+On the gap-pillar beat that means the bar and its three readings stay on screen
+while the voice finishes explaining them, instead of cutting away the moment the
+bar finished drawing.
+
+Which is also why beat timings are rewritten after narration. The published video
+is no longer the render, and a citation that seeks to `[beat:b3]` has to land on b3
+in the file the page actually serves. `silent.mp4` and `silent.spans.json` beside it
+keep the render and its own timings, so re-narrating computes the same answer from
+the same input rather than padding its own output.
 
 Every variable is spoken with forced phonemes, so "y" is the letter and not "ee",
 and "a" is the letter and not the article.
 
 The voice is pinned to `ba1cd26ca87b42b2bf7d60c1f65f9242` ("Adam - Calm, Smart").
 That is not cosmetic: every beat is a separate API request, so an unset voice
-gives one video five different narrators.
+gives one video a different narrator on every beat.
 
 To change voice, set `FISH_VOICE_ID` and then re-measure the rate, because the
 word budget is calibrated to the voice:
@@ -86,7 +133,7 @@ To re-narrate after any change, which costs one model call and a few seconds of
 TTS against a render that already exists:
 
 ```bash
-uv run python scripts/narrate_session.py 84b52e28-05dd-4a33-a295-e3a3b6c167e7
+uv run python scripts/narrate_session.py fa8f9e92-220d-4345-b9e5-484a228fb6ff
 ```
 
 Safe to run repeatedly: it reads `silent.mp4` and republishes over `video.mp4`,
@@ -113,10 +160,10 @@ displays it and `/api/insights` never returns it.
    statement, and four badges: *✓ checked with SymPy · diverges at step 1 ·
    confidence 95% · 2 other students made this error*. The SymPy badge is the
    measured result, not the model's claim.
-3. **The animation and the rail** — click **0:13 Area model**; the player seeks to
-   13.85s against that beat's measured start of 13.8s, and the rail's active chip
-   follows the playhead as the video runs. Every chip is also a real accessible
-   control ("Jump to 0:13, Area model"), so the rail is keyboard-reachable.
+3. **The animation and the rail** — click **0:18 3D surfaces**; the player seeks to
+   that beat's measured start, and the rail's active chip follows the playhead as
+   the video runs. Every chip is also a real accessible control ("Jump to 0:18, 3D
+   surfaces"), so the rail is keyboard-reachable.
 4. **Chat** — say *"Hey Astray, why doesn't my rule work"* (see *Asking by voice*
    below; grant the permission and reload **before** recording, and press the
    microphone button instead if the phrase misses). Three exchanges are already in
@@ -136,7 +183,62 @@ displays it and `/api/insights` never returns it.
 
 ## Asking by voice: "Hey Astray"
 
-Say **"Hey Astray, why doesn't my rule work"** and it answers. No button.
+Say **"Hey Astray, why doesn't my rule work"** and it answers, out loud. No button.
+
+### It decides whether you changed the subject
+
+"Hey Astray" is not only a way to ask about the animation on screen. Every spoken
+sentence is routed first, and the routing is the point: a follow-up goes to this
+conversation, a *different problem* becomes a new problem with its own animation.
+
+> "Hey Astray, I still don't get the binomial thing" → answered here.
+>
+> "Hey Astray, I was working on differential equations and I couldn't figure out
+> dy/dx equals 2x minus 5 over y squared" → a new session, diagnosed and animated.
+
+The second one is the case this was built for, because it used to fail silently.
+Said mid-session, it was answered as a question about expanding a bracket: a reply
+grounded in the wrong animation, and no animation ever built for what was asked.
+
+The same call repairs the speech, which is not optional. Chrome delivered that
+sentence as **"I was solving DUI over DX = 2x - 5 over y squared"** — verbatim,
+from a real session — and `dy/dx` has to come back before anything can diagnose it.
+It is speech-to-text, not a maths recogniser, so the repair is a model call, not a
+regex. Ambiguous cases go to the conversation on purpose: a new problem answered
+in the existing chat is one sentence to correct, where a follow-up sent to a
+three-minute render is not.
+
+What was heard is printed above the diagnosis, because a spoken problem was never
+typed anywhere you can check it.
+
+### You do not have to have tried anything
+
+Steps are the premise of this product, not a requirement of it. "I kept getting
+stuck and I don't know what to do" is a real thing to say, and there is no wrong
+step in it to find.
+
+So a session with no working shown **explains the method** instead of diagnosing a
+mistake. The card reads *How to solve it* over the solved steps rather than *Here's
+where it went astray*, and the animation teaches the method.
+
+This is a framing swap, not a second pipeline: every stage from s2 to s7 reads the
+diagnosis' `buggy_rule` and `misconception_statement`, so those two fields are
+replaced once, in `pipeline.as_explainer`, and each stage carries on doing its job.
+Narration gets a separate prompt, because that is the one place the wrong framing
+does real harm: telling a student *"you thought a plus b, all squared, equals a
+squared plus b squared"* when they never said any such thing invents a mistake and
+then attributes it to them.
+
+Worth knowing why this needed doing at all: the first live run of a spoken problem
+with no working came back with a storyboard containing a beat titled **"Buggy
+Method"**. Every stage had been told to target a misconception, so lacking one, it
+made one up.
+
+### Everything you have asked is on the front page
+
+**Your problems**, under the form on `/#/`. Newest first, with what each one turned
+out to be. This is how you get back to a problem you *spoke*: there was no form
+submission behind it and no URL you typed.
 
 The state is written out beside the chat heading, always, in words: *Hey Astray:
 listening* / *your turn* / *paused* / *off*. Click that chip to mute. The
@@ -201,13 +303,27 @@ blip so you know to start talking.
 
 | Session | Problem | The beat that argues |
 |---|---|---|
+| `bb6a4531-dbde-4d4e-953c-6237dd1e3245` | `d/dx sin(x²)` → `cos(x²)` | `lift`: the composition in space, then equal steps in `x` becoming unequal steps in `u` |
 | `5901c1da-fe6b-4e55-a4f6-31bd5834cb38` | `x^2 = 16` → `x = 4` | `numberline`: a second dot lands at −4 where the student had nothing |
-| `224c344d-7e25-47d1-959d-a204edd29232` | `d/dx sin(x²)` → `cos(x²)` | `graph`: `2x cos(x²)` against `cos(x²)`, marked at x=0 as 0 against 1 |
 
-The lost-root case is the clearest argument for having more than one primitive.
-Every line the student wrote is true, so there is nothing to cross out and a
-side-by-side comparison has no content; the error is an *absence*, and on a line
-an absence is a place.
+**The chain rule is the second cinematic one**, 44.9s, five beats, and it is the
+clearest case for giving the middle quantity its own axis. b3 draws `sin(x²)` as a
+single curve in space whose three shadows are the three stages: `u = x²` on the
+floor, `sin(u)` up the wall, and the answer on the back. The middle value is
+invisible in flat algebra, which is exactly why the factor that comes from it goes
+missing.
+
+b4 is the one that names the error. Equal steps along `x` are carried up to the
+inner curve and across, and the marks they leave are bunched near zero and spread
+apart at the ends. That spacing ratio *is* `2x`. The student did not write a wrong
+number; they wrote an answer that assumes the middle quantity keeps pace with `x`,
+and the picture is that assumption failing.
+
+**The lost-root case is deliberately left flat**, and it is the clearest argument
+for having more than one primitive rather than one impressive one. Every line the
+student wrote is true, so there is nothing to cross out and a side-by-side
+comparison has no content; the error is an *absence*, and on a line an absence is a
+place. A surface would add nothing here but spectacle.
 
 ## Worth knowing before you record
 
@@ -231,3 +347,8 @@ straight over it. It exists to be counted, not to be shown.
 the primitives, and it is worth opening *deliberately* beside the golden case: six
 beats of white maths text on black, 34.8s, three render attempts and two repair
 rounds. Same pipeline, same problem, no picture.
+
+`84b52e28-05dd-4a33-a295-e3a3b6c167e7` is the same problem again, from after the
+flat primitives and before the spatial ones: five beats, 43.6s, a correct and
+readable area model and nothing in three dimensions. Open it if someone asks what
+the surfaces actually added.
