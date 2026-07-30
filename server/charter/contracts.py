@@ -194,7 +194,14 @@ class Beat(BaseModel):
     teaching_purpose: str
     on_screen: str
     targets_misconception: bool = False
-    primitive: Literal["numberline", "areamodel", "algebra_steps", "graph", "balance", "custom"]
+    # Every value here except `custom` names a real builder in
+    # `server/render/primitives/`. That was not true until it was measured: the
+    # enum offered `graph` and `balance` for months with nothing behind either, so
+    # a beat choosing one got improvised Manim with no fitting and no frame
+    # ownership. `balance` is gone rather than built -- equation solving is already
+    # served well by `algebra_steps`, and an option nothing can render is worse
+    # than an option that does not exist.
+    primitive: Literal["numberline", "areamodel", "algebra_steps", "graph", "custom"]
 
 
 class Storyboard(BaseModel):

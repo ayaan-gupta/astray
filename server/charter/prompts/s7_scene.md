@@ -19,17 +19,101 @@ executes. Violating any rule below fails the render:
 4. Use `MathTex` for mathematics, never `Tex` -- `Tex` renders in LaTeX text mode
    where a bare `^` raises "Missing $ inserted" and kills the render. Do not wrap
    expressions in `$`; `MathTex` is already math mode.
-5. Available helpers (import from `primitives.<module>`):
-   - `primitives.beats.beat(scene, id)` -- required, above.
-   - `primitives.layout.title_card(text, subtitle="")` -- fitted title group.
-   - `primitives.layout.math_lines(lines, font_size=40)` -- stacked math, fitted.
-   - `primitives.algebra_steps.step_sequence(scene, lines)` -- reveal lines in turn.
-   - `primitives.algebra_steps.compare_rules(scene, wrong_lines, right_lines)` --
-     shows the student's rule crossed out beside the correct one. Use this for the
-     beat that targets the misconception.
-6. Keep the frame clean: fade out what you are done with before the next beat.
-   Overlapping leftovers are the most common way these renders come out unreadable.
-7. Total runtime should be close to the storyboard's estimate.
+5. **Pace each beat individually, and pace it short.** `seconds_per_beat` below is
+   roughly how long one beat should last in total, animation included. The helpers
+   animate for one to four seconds on their own, so a beat usually needs a single
+   `self.wait(2)` or `self.wait(3)` after its content is on screen, and a little
+   more only where there are several lines to read.
+
+   Never write a wait longer than 5. A held frame is a still image, and a viewer
+   reads one in about two seconds; past that the video looks broken. Do not try to
+   reach a total runtime by waiting longer, and do not divide a total budget among
+   the beats: a scene of four beats each holding a static frame for 35 seconds is a
+   worse animation than the same four beats in 40 seconds, not a longer one.
+
+   Every beat is held open to a five second floor whatever you write, so a scene
+   with no waits at all still renders and stays citable.
+
+## Reach for a primitive before writing your own
+
+Each helper below clears the previous beat before drawing and scales what it
+draws to fit the frame. Hand-rolled equivalents are the main source of
+unreadable renders, so prefer a primitive whenever one covers the beat, and use
+the primitive the beat's `primitive` field names.
+
+**Three rules apply to all of them.**
+
+- **Do not fade out what a primitive returned, and do not track a "last group".**
+  The next primitive clears the frame itself.
+- **Each returns a single Mobject that also unpacks into its parts**, so both
+  `corners, middles = binomial_square(self)` and `FadeOut(result)` are safe.
+- **Pass LaTeX strings, never built Mobjects**, wherever a helper takes maths.
+  `compare_rules(self, [MathTex("x^2")], ...)` is wrong; pass `["x^2"]`.
+
+### Symbolic derivations -- `from primitives.algebra_steps import ...`
+
+    step_sequence(scene, lines: list[str]) -> VGroup
+        Reveal LaTeX lines one at a time, top to bottom.
+
+    compare_rules(scene, wrong_lines: list[str], right_lines: list[str],
+                  wrong_label: str = "What you did",
+                  right_label: str = "What the rule actually gives") -> VGroup
+        The student's derivation crossed out in red beside the correct one in
+        green. The default choice for a beat targeting the misconception.
+
+### Function graphs -- `from primitives.graph import ...`
+
+    compare_functions(scene, correct, wrong,
+                      x_range: tuple[float, float] = (-3.0, 3.0),
+                      correct_label: str = "correct",
+                      wrong_label: str = "your answer",
+                      y_range: tuple[float, float] | None = None) -> VGroup
+        Plot both functions on one set of axes, correct in green and the
+        student's in red. `correct` and `wrong` are CALLABLES of one argument;
+        write them as lambdas over numpy, e.g.
+        `lambda x: 2 * x * np.cos(x ** 2)`. The y window, tick spacing and
+        legend are chosen for you. Unpacks as `axes, right, wrong`.
+
+    mark_divergence(scene, axes, correct, wrong, x: float) -> VGroup | None
+        At one x, a dashed vertical line and a labelled dot on each curve, so the
+        gap becomes two numbers. Pass the same callables and the `axes` that
+        `compare_functions` returned. Returns None where either is undefined.
+
+### Area arguments -- `from primitives.area import ...`
+
+    binomial_square(scene, a_label="a", b_label="b", a_term="a^2",
+                    b_term="b^2", middle_term="ab") -> VGroup
+        A square of side (a+b) split into a^2, two ab rectangles and b^2, drawn
+        to scale. Unpacks as `corners, middles`. The strongest argument against
+        `(a+b)^2 -> a^2 + b^2`: the two ab rectangles are visibly there. Pass the
+        student's actual letters and terms, e.g. `a_label="y", b_label="3"`.
+
+    missing_area(scene, corners, middles, caption: str) -> Mobject
+        Dim the corner squares, hold the two ab rectangles, caption them. Takes
+        the two groups `binomial_square` returned.
+
+    area_totals(scene, kept: str, actual: str) -> VGroup
+        Two LaTeX totals along the bottom edge: what the student's rule accounts
+        for, and what the square actually measures.
+
+### Lost solutions -- `from primitives.numberline import ...`
+
+    missing_roots(scene, found: list[float], missed: list[float],
+                  found_label="you found",
+                  missed_label="also a solution") -> VGroup
+        A number line marking the solutions the student found, a pause, then the
+        ones they missed. When the error is an absence (`x^2 = 16 -> x = 4`) there
+        is nothing to cross out, so this replaces `compare_rules`.
+
+### Layout -- `from primitives.layout import ...`
+
+    title_card(text: str, subtitle: str = "") -> VGroup
+    math_lines(lines: list[str], font_size: int = 40) -> VGroup
+    caption(scene, text: str) -> Mobject
+
+`title_card` and `math_lines` build a Mobject and return it *without* animating,
+so play them yourself and fade them out yourself. Every other helper above
+animates, and needs no `self.play` around it.
 
 Return only JSON matching the schema: `scene_class_name`, `code`, `beats_covered`.
 `code` is the complete file as a single string.

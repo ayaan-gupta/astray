@@ -30,6 +30,22 @@ MANIFEST_PATH = os.path.join(MANIFEST_DIR, "manifest.json")
 
 _TIMINGS: list[dict] = []
 
+# The shortest a beat is allowed to be, held open on exit if its animations
+# finished sooner. This is a guarantee rather than a request, for the same reason
+# `clear_frame` lives in the primitives: the s7 prompt asks for pacing, and a live
+# render came back with no `self.wait()` anywhere in the file, six beats, and a
+# total runtime of 12.5s against a storyboard estimate of 90. One beat lasted
+# 0.8 seconds.
+#
+# Two things break at that length, and neither is cosmetic. A citation seeking to
+# a beat 0.8s wide points at a moment gone before the student can look at it, so
+# the grounding contract stops meaning anything. And the narration budget is
+# computed from measured duration, so a 0.8s beat gets a three-word line -- which
+# is exactly the "random four- or five-word phrases" failure the narration work
+# was meant to end. At 5.0s a beat holds about ten spoken words and is long enough
+# to seek to.
+MIN_BEAT_S = 5.0
+
 
 def _scene_time(scene) -> float:
     """Elapsed animation time, from the renderer clock.
@@ -70,16 +86,39 @@ def beat(scene, beat_id: str):
     `s8_validate` enforces that every planned beat id appears exactly once in a
     `with beat(...)` block, so this is a contract the pipeline checks statically
     before the container ever runs, not a convention the model is asked to honour.
+
+    On a clean exit the beat is held open to `MIN_BEAT_S`, so no beat is too short
+    to seek to or to narrate over.
     """
     start = _scene_time(scene)
     try:
         yield
-    finally:
-        # `finally`, so a beat whose animations raise still records its span --
-        # the traceback goes to the repair loop, and any beats that completed
-        # before it stay citable.
-        _TIMINGS.append({"id": beat_id, "start": start, "end": _scene_time(scene)})
-        _flush()
+    except BaseException:
+        # A beat whose animations raise still records its span: the traceback goes
+        # to the repair loop, and beats that completed before it stay citable. No
+        # hold here -- padding a beat that just died would only delay the failure.
+        _record(scene, beat_id, start)
+        raise
+    _hold(scene, start)
+    _record(scene, beat_id, start)
+
+
+def _hold(scene, start: float) -> None:
+    """Wait out the remainder of `MIN_BEAT_S`, if the beat ran short."""
+    remaining = MIN_BEAT_S - (_scene_time(scene) - start)
+    if remaining <= 0.05:
+        return
+    try:
+        scene.wait(remaining)
+    except Exception:
+        # Pacing is a nicety; a video is not. Never let the hold be what fails a
+        # render that had already drawn its beat successfully.
+        pass
+
+
+def _record(scene, beat_id: str, start: float) -> None:
+    _TIMINGS.append({"id": beat_id, "start": start, "end": _scene_time(scene)})
+    _flush()
 
 
 def reset() -> None:

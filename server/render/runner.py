@@ -136,6 +136,13 @@ def docker_argv(paths: RenderPaths, scene_class_name: str, timeout_s: int) -> li
         "ASTRAY_OUT_DIR=/out",
         "-e",
         "HOME=/home/manimuser",
+        # Fontconfig writes its cache to $XDG_CACHE_HOME (or ~/.cache) and, with
+        # --read-only, emitted "No writable cache directories" once per font
+        # lookup: twenty identical lines at the head of every render log, ahead of
+        # the tail that actually carries a traceback. Harmless, but it is the log
+        # a failed render gets diagnosed from, and noise there costs real time.
+        "-e",
+        "XDG_CACHE_HOME=/tmp/cache",
         IMAGE,
         "timeout",
         str(timeout_s),

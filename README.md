@@ -59,12 +59,70 @@ measures each beat's real start and end from the renderer clock, so a chat
 citation seeks to a moment that actually exists. Unknown beat ids in a reply are
 stripped server-side rather than shown as dead links.
 
+`beat()` also holds each beat open to a five second floor, which is a duration
+guarantee rather than a request. A live render came back with no `self.wait()`
+anywhere in the file: six beats, 12.5s of video against a storyboard estimate of
+90, and one beat lasting 0.8 seconds. Two things break at that length and neither
+is cosmetic. A citation into a 0.8s beat points at a moment gone before the
+student can look at it, so grounding stops meaning anything. And the narration
+budget is computed from measured duration, so that beat earns a three word line,
+which is exactly the disconnected-caption failure the narration work exists to
+prevent.
+
+**The storyboard's vocabulary is backed by real builders.** `s6` picks a
+`primitive` per beat, and that choice is what the beat looks like. For a long time
+the enum offered `graph` and `balance` with nothing behind either, so a beat
+choosing one got improvised Manim: no scaling to fit, no ownership of the frame,
+and an unguarded call into whatever function the model named. Measured across
+every stored session, `s6` chose `algebra_steps` for 16 of 19 beats and `graph`
+never once, which is how a misconception tutor ends up explaining calculus with
+white text fading in and out.
+
+There is now a builder for each: an area model that splits a square of side (a+b)
+into `a²`, two `ab` rectangles and `b²` drawn to scale; a graph that plots the
+correct function against the student's on one set of axes; a number line for
+errors that are an *absence*, where nothing exists to cross out. `balance` was
+removed rather than built, because equation solving is already served by
+`algebra_steps` and an option nothing can render is worse than an option that does
+not exist.
+
+Which one wins is a property of the misconception. `(a+b)^2 -> a^2 + b^2` survives
+a derivation, because a student who believes it watches the correct expansion,
+agrees with every line, and keeps the belief: the two sides are competing strings.
+It does not survive the square, where the two `ab` rectangles are visibly
+occupying area that `a^2 + b^2` does not account for. A lost root
+(`x^2 = 16 -> x = 4`) is the opposite problem, since every line the student wrote
+is true and the error is a missing one; on a line the absence becomes a place.
+
 **Generated code is untrusted.** It runs behind an AST allow-list (imports
 limited to `manim`, `numpy`, `math`, `primitives`; no dunder attribute access)
 *and* inside a `--network=none`, read-only, non-root container with memory, CPU
 and PID caps and a wall clock enforced twice. Neither layer is trusted alone. If
 codegen fails twice, a deterministic renderer builds the same beats with no
 model-authored code at all.
+
+The primitives are the trusted layer, and they are held to their own line: the
+validator inspects the *generated scene*, never the package that scene imports, so
+an import added to a primitive would pass every existing gate. A test enumerates
+what each one may import beyond the scene allow-list, with the reason attached, so
+widening it is deliberate.
+
+**A primitive owns its frame and never returns a bare tuple.** Both rules were
+written against live failures. Asking generated code to tidy up after itself was
+observed to fail, so every primitive clears the frame before drawing. And
+`compare_rules` used to return `(wrong, right)`: a scene assigned that to a
+variable, called `FadeOut` on it, and died with `TypeError: Animation only works on
+Mobjects`. Returning a `VGroup` serves both callers, since a `VGroup` is iterable,
+so `wrong, right = compare_rules(...)` and `FadeOut(result)` are now the same
+object.
+
+The same reasoning pushed type tolerance into the primitives rather than the
+prompt. Generated code called `compare_rules(self, [MathTex(...)], ...)`, which is
+a fair reading of "lines of maths"; `MathTex` accepted the Mobject, stringified it,
+and typeset its repr, so the misconception beat read
+`MathTex('fracdydx = cos(x^2)')` in crossed-out red and the render was recorded as
+a success. The `Text` fallback that exists to survive bad LaTeX is what concealed
+it, by turning a loud `TypeError` into a quiet wrong frame.
 
 **Secrets never leave the server.** Keys live only in a gitignored `server/.env`.
 Upstream error text never reaches a client — a DeepSeek error body once reflected
@@ -118,6 +176,11 @@ student's own working, the correct steps and the diagnosis evidence, shows a
 worked example of the standard to match, and gives each beat a word *target* as
 well as a maximum. A cap alone reads as a floor: told only "at most N words", the
 model writes a caption and leaves the animation playing in silence.
+
+The other half of that fix is not in the narration code at all. A word budget is
+computed from a beat's measured duration, so a short beat cannot hold a sentence
+however good the prompt is, and `beat()`'s five second floor is what guarantees
+there is a sentence's worth of room to write into.
 
 **Every variable gets forced phonemes.** A lone letter is genuinely ambiguous to
 a TTS model and it guesses badly: "a" is the commonest word in English so it comes
@@ -219,7 +282,7 @@ with KaTeX in the review field.
 ## Development
 
 ```bash
-uv run pytest          # 340 tests; no network and no Docker — both are mocked
+uv run pytest          # 477 tests; no network and no Docker — both are mocked
 uv run ruff check .
 uv run ruff format --check .
 uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model
@@ -229,6 +292,26 @@ The eval harness scores rule match, topic match, and SymPy verification rate.
 Rule match is currently **not** a trustworthy gate — see the plan's Definition
 of Done for why the scorer rejects substantively correct diagnoses on notation.
 Topic match and verification rate are reliable.
+
+Three scripts cover what a test cannot reach, because the interesting failures in
+this pipeline are visual and the primitives import `manim`, which exists only
+inside the render image:
+
+```bash
+uv run python scripts/check_primitives.py            # every primitive, one frame each
+uv run python scripts/run_session.py --preset binomial   # a whole session, real calls
+uv run python scripts/seed_chat.py <session-id>      # grounded chat for a demo
+```
+
+`check_primitives.py` renders every helper through the real sandbox and writes one
+PNG per beat. It deliberately includes the abuse the live pipeline produced as well
+as the correct usage: a Mobject where a string belongs, a function with a pole
+inside the plot window, a label too wide for its cell. Each of those cost a render
+or a frame before it was handled.
+
+`run_session.py` runs one problem end to end with real model calls and a real
+container, which is how the storyboard's primitive choices were actually measured
+rather than assumed.
 
 Rendering needs Docker and `manimcommunity/manim:stable`. Set `RENDER_ENABLED=0`
 to plan animations without running containers — the pipeline still produces beats,

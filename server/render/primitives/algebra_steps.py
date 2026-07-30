@@ -10,7 +10,6 @@ untouched -- they watch it, agree with it, and keep their misconception.
 from manim import (
     DOWN,
     GREEN,
-    LEFT,
     RED,
     RIGHT,
     UP,
@@ -49,7 +48,15 @@ def compare_rules(
     the buggy one.
 
     The cross is not decoration: it is the moment the student's rule is
-    explicitly rejected on screen. Returns (wrong_group, right_group).
+    explicitly rejected on screen.
+
+    Returns a VGroup of the two columns, which unpacks as
+    `wrong, right = compare_rules(...)` because a VGroup is iterable. Returning a
+    bare tuple is what this used to do, and it killed a live render: the generated
+    scene assigned the tuple to a variable and called `FadeOut` on it, which is
+    `TypeError: Animation only works on Mobjects`. A single Mobject that still
+    unpacks serves both callers, so the convenient shape and the safe shape are
+    the same object.
     """
     clear_frame(scene)
     wrong = VGroup(Text(wrong_label, font_size=26, color=RED), math_lines(wrong_lines, 34)).arrange(
@@ -62,7 +69,7 @@ def compare_rules(
     columns = VGroup(wrong, right).arrange(RIGHT, buff=1.0, aligned_edge=UP)
     fit(columns)
 
-    scene.play(FadeIn(wrong.shift(LEFT * 0.0)), run_time=run_time)
+    scene.play(FadeIn(wrong), run_time=run_time)
     scene.play(Create(Cross(wrong[1], color=RED, stroke_width=6)), run_time=run_time)
     scene.play(FadeIn(right), run_time=run_time)
-    return wrong, right
+    return columns
