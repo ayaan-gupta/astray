@@ -7,9 +7,13 @@ its already-measured beat timings and only does the audio half.
 
     uv run python scripts/narrate_session.py <session-id>
 
-Writes `narrated.mp4` beside the original render and repoints the session at it.
-The original is left in place, so this is reversible by pointing the render row
-back at the file it named before.
+It is also how a narration prompt change is tried out, since the script costs one
+model call and a few seconds of TTS against a render that already exists.
+
+Publishes over the render's own path and keeps the untouched original beside it as
+`silent.mp4`. That is what makes it safe to re-run: a second pass reads the silent
+copy rather than handing ffmpeg its own previous output, and the URL the page
+already serves keeps working.
 """
 
 import argparse

@@ -52,6 +52,17 @@ the primitive the beat's `primitive` field names.
 - **Pass LaTeX strings, never built Mobjects**, wherever a helper takes maths.
   `compare_rules(self, [MathTex("x^2")], ...)` is wrong; pass `["x^2"]`.
 
+**Two things not to do to a primitive's output**, both of which produced bad frames:
+
+- **Do not restyle or relabel what it returned.** Reaching into the groups from
+  `binomial_square` to recolour them and write your own `3y` labels over the cells
+  reproduces, worse, what `missing_area` already does. If you want different
+  emphasis, call the helper for it.
+- **Do not stack your own text under a diagram with chained `.next_to(...)`.**
+  Nothing fits that chain to the frame, so the second or third line runs off the
+  bottom edge and is clipped. `area_totals` places two totals and `caption` places
+  one line, both inside the frame and both aware of each other.
+
 ### Symbolic derivations -- `from primitives.algebra_steps import ...`
 
     step_sequence(scene, lines: list[str]) -> VGroup

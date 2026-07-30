@@ -81,10 +81,15 @@ Use contractions and short sentences. Talk, do not recite. Punctuation is your
 only control over the voice, so put a comma where you want a breath and a full
 stop where you want a stop. Never use an em dash, an en dash, brackets, or a colon.
 
-Do not describe the animation ("here we see", "on the left"). Say the maths.
+Name what is in the picture, but never narrate the medium. "The two small corner
+squares" and "the square of side y plus three" are the explanation, because the
+beat has a square in it and those cells are the argument. "Here we see", "on the
+left of the screen", "this animation shows" are filler that spends words without
+teaching anything.
 
-Never tell the student their wrong answer was right, and never address them as
-though they are watching someone else's mistake.
+Say "you" and "your answer". Never "the student", and never write as though the
+student were watching someone else's mistake. Never tell them their wrong answer
+was right.
 
 Each beat gives a word target and a hard maximum, both derived from how long that
 beat is actually on screen. Aim for the target: coming in far under it leaves the
