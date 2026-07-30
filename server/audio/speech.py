@@ -154,6 +154,90 @@ def pace(text: str) -> str:
     return out.strip().strip(",").strip()
 
 
+# Letter names in CMU Arpabet, with the stress digits Fish requires. A lone letter
+# in running text is genuinely ambiguous to a TTS model and it guesses badly: "a"
+# is the most common word in English so it comes out as the article /ə/ rather than
+# the letter /eɪ/, and "y" collapses toward /iː/. Forcing the phonemes is the only
+# reliable fix, since the letter is the variable and mispronouncing it makes the
+# maths unintelligible.
+LETTER_ARPABET = {
+    "a": "EY1",
+    "b": "B IY1",
+    "c": "S IY1",
+    "d": "D IY1",
+    "e": "IY1",
+    "f": "EH1 F",
+    "g": "JH IY1",
+    "h": "EY1 CH",
+    "i": "AY1",
+    "j": "JH EY1",
+    "k": "K EY1",
+    "l": "EH1 L",
+    "m": "EH1 M",
+    "n": "EH1 N",
+    "o": "OW1",
+    "p": "P IY1",
+    "q": "K Y UW1",
+    "r": "AA1 R",
+    "s": "EH1 S",
+    "t": "T IY1",
+    "u": "Y UW1",
+    "v": "V IY1",
+    "w": "D AH1 B AH0 L Y UW0",
+    "x": "EH1 K S",
+    "y": "W AY1",
+    "z": "Z IY1",
+}
+
+# Operators and post-modifiers only. Nouns must NOT be in here: the whole test is
+# that an article introduces a noun while a variable sits next to maths, so listing
+# "term" or "bracket" inverts it and tags the article in "missing a middle term".
+MATHS_CONTEXT = frozenset("plus minus times over equals squared cubed itself".split())
+
+# "a" and "i" are also ordinary English words, so they are the only two letters
+# that need evidence before being treated as variables. Every other single letter
+# is never a word, so a lone one is always a variable.
+AMBIGUOUS_LETTERS = frozenset({"a", "i"})
+
+_TOKEN = re.compile(r"[A-Za-z]+|\d+|[^\sA-Za-z\d]+|\s+")
+
+
+def _is_variable(token: str, before: list[str], after: list[str]) -> bool:
+    if len(token) != 1 or token.lower() not in LETTER_ARPABET:
+        return False
+    if token.lower() not in AMBIGUOUS_LETTERS:
+        return True
+    # An article is followed by the noun it introduces; a variable sits next to
+    # maths. Look one word each way, which is enough to separate "a middle term"
+    # from "a plus b" and "two a b".
+    neighbours = {w.lower() for w in before[-1:] + after[:1]}
+    return bool(neighbours & MATHS_CONTEXT) or any(
+        len(w) == 1 and w.lower() in LETTER_ARPABET for w in before[-1:] + after[:1]
+    )
+
+
+def with_letter_phonemes(text: str) -> str:
+    """Force the pronunciation of single-letter variables, for the API call only.
+
+    Kept separate from `speakable` on purpose: the tags are markup for Fish, not
+    text. `speakable` output is what gets word-counted, stored and shown in the
+    docs, and it stays readable. This runs last, on the way out.
+    """
+    tokens = _TOKEN.findall(text)
+    words = [t for t in tokens if t.isalpha()]
+    out, seen_words = [], 0
+    for token in tokens:
+        if token.isalpha():
+            before, after = words[:seen_words], words[seen_words + 1 :]
+            seen_words += 1
+            if _is_variable(token, before, after):
+                arpabet = LETTER_ARPABET[token.lower()]
+                out.append(f"<|phoneme_start|>{arpabet}<|phoneme_end|>")
+                continue
+        out.append(token)
+    return "".join(out)
+
+
 def word_count(text: str) -> int:
     """Words as a voice would count them, for budgeting against a beat."""
     return len(re.findall(r"[^\s]+", speakable(text)))

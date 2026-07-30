@@ -43,11 +43,14 @@ sound on.** The untouched render is kept beside it as `silent.mp4`.
 
 Read end to end, which is how it was written:
 
-> We need to expand y plus three, all squared. y plus three times itself gives y
-> squared, three y plus three y, and nine. You squared each term separately, giving
-> y squared plus nine. Your answer y squared plus nine is missing the middle term
-> six y. Try y equals one. The correct answer is sixteen, yours gives ten. Remember
-> a plus b, all squared is a squared plus two a b plus b squared.
+> We need to expand y plus three, all squared. Y plus three, all squared, equals y
+> squared plus six y plus nine. Squaring each term separately gives y squared plus
+> nine. The correct expansion has a middle term six y, which is missing from your
+> answer. When y equals one, the right answer is sixteen, but yours is ten. A plus
+> b, all squared equals a squared plus two a b plus b squared.
+
+Every variable is spoken with forced phonemes, so "y" is the letter and not "ee",
+and "a" is the letter and not the article. 28.2s of speech in 34.8s of video.
 
 The voice is pinned to `ba1cd26ca87b42b2bf7d60c1f65f9242` ("Adam - Calm, Smart").
 That is not cosmetic: every beat is a separate API request, so an unset voice

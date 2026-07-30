@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server.audio.fish import FishAudioClient  # noqa: E402
-from server.audio.speech import word_count  # noqa: E402
+from server.audio.speech import with_letter_phonemes, word_count  # noqa: E402
 from server.config import get_settings  # noqa: E402
 
 # Deliberately spans the range the narrator actually has to cover: the first two
@@ -64,8 +64,12 @@ async def measure(voice_id: str | None, label: str) -> dict:
     )
     rates, total_words, total_s = [], 0, 0.0
     try:
+        # Measure what is actually sent, phoneme tags included. Forcing the letter
+        # names costs about 5% in duration on maths-heavy lines, and a rate
+        # calibrated on untagged text is optimistic by exactly that much.
         clips = await asyncio.gather(
-            *(client.synthesize(line) for line in LINES), return_exceptions=True
+            *(client.synthesize(with_letter_phonemes(line)) for line in LINES),
+            return_exceptions=True,
         )
     finally:
         await client.aclose()

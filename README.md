@@ -119,6 +119,24 @@ worked example of the standard to match, and gives each beat a word *target* as
 well as a maximum. A cap alone reads as a floor: told only "at most N words", the
 model writes a caption and leaves the animation playing in silence.
 
+**Every variable gets forced phonemes.** A lone letter is genuinely ambiguous to
+a TTS model and it guesses badly: "a" is the commonest word in English so it comes
+out as the article, and "y" collapses toward "ee". Fish supports phoneme control,
+so `speech.with_letter_phonemes` wraps single-letter variables in
+`<|phoneme_start|>W AY1<|phoneme_end|>` style CMU Arpabet on the way to the API.
+
+Only "a" and "i" need evidence before being treated as variables, since they are
+the only single letters that are also English words: they are tagged when they sit
+next to an operator or another variable, and left alone otherwise. The maths-context
+set deliberately contains no nouns, because the test is that an article introduces a
+noun while a variable sits next to maths, and listing "term" inverted it and spoke
+the article in "missing a middle term" as the letter A.
+
+The tags are markup, not text, so they are added at the API boundary only: what
+gets word-counted, stored and quoted in the docs stays readable. They are also
+billed, since Fish charges per character, which roughly doubles a video's narration
+cost to about $0.013.
+
 Narration is non-fatal. A silent video is a working session; a render discarded
 because a voice API was down is not, so every failure logs and leaves the
 original video in place. It republishes over the render's own path and keeps the

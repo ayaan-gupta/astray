@@ -19,7 +19,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from server.audio import mux, narrate
+from server.audio import mux, narrate, speech
 from server.audio.fish import FishAudioClient, SpeechError
 from server.charter.contracts import StageName
 from server.config import Settings
@@ -171,8 +171,11 @@ async def _synthesize(
     otherwise serialise six round trips for no reason. Bounded by the number of
     beats, which is single digits, so there is no semaphore to add.
     """
+    # Phoneme tags are added here rather than in the script, so what gets stored
+    # and shown stays readable text and only the API sees the markup.
     results = await asyncio.gather(
-        *(client.synthesize(text) for _, text in script), return_exceptions=True
+        *(client.synthesize(speech.with_letter_phonemes(text)) for _, text in script),
+        return_exceptions=True,
     )
 
     clips: list[tuple[str, Path, float]] = []

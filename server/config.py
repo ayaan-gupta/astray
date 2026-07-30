@@ -54,13 +54,18 @@ class Settings(BaseSettings):
     narration_enabled: bool = True
     narration_timeout_s: int = 120
     # A property of the chosen voice, not a constant, and measured rather than
-    # guessed: scripts/measure_voice.py reports it. For the pinned voice above the
-    # mean is 2.84 words/second and the slowest line is 2.57, so this sits just
-    # under the slowest, because a line that overruns pushes the next one late
-    # while a short line costs nothing. Every voice measured slows markedly on
-    # dense spoken maths, which is why the slow end is the one that matters.
-    # Re-measure when changing fish_voice_id: candidates spanned 2.14 to 2.84.
-    narration_words_per_second: float = 2.49
+    # guessed: scripts/measure_voice.py reports it, on the text actually sent,
+    # phoneme tags included. Forcing the letter names costs about 5% in duration,
+    # so a rate measured on untagged text is optimistic by that much: for this
+    # voice the mean fell from 2.84 to 2.76 and the slowest line from 2.57 to 2.39
+    # once tagging was included, and 2.49 (set from the untagged figure) was above
+    # the slowest line, which is exactly the beat that then overran.
+    #
+    # This sits just under the slowest measured line, because a line that overruns
+    # pushes the next one late while a short line costs nothing. Every voice
+    # measured slows markedly on dense spoken maths, which is why the slow end is
+    # the one that matters. Re-measure when changing fish_voice_id.
+    narration_words_per_second: float = 2.32
     # Slightly under real time. Maths needs a fraction more room than prose.
     narration_speed: float = 0.96
 

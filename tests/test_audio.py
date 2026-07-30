@@ -89,6 +89,54 @@ def test_all_squared_always_gets_its_comma(written, spoken):
     assert speech.speakable(written) == spoken
 
 
+@pytest.mark.parametrize(
+    "text,expected_tags",
+    [
+        ("y plus three, all squared.", 1),
+        ("a plus b, all squared is a squared plus two a b plus b squared.", 6),
+        ("x squared plus two x y plus y squared.", 4),
+        ("Your answer is missing a middle term.", 0),
+        ("I think a bracket needs care.", 0),
+        ("The correct answer is sixteen, yours gives ten.", 0),
+    ],
+    ids=[
+        "y-is-always-a-variable",
+        "a-and-b-beside-operators",
+        "several-variables",
+        "article-before-a-noun-is-left-alone",
+        "the-word-I-is-left-alone",
+        "prose-untouched",
+    ],
+)
+def test_single_letter_variables_get_forced_phonemes(text, expected_tags):
+    """A lone letter is genuinely ambiguous to the model and it guesses badly: "a"
+    is the commonest word in English so it comes out as the article, and "y"
+    collapses toward "ee". Only the two letters that are also English words need
+    evidence before being treated as variables."""
+    out = speech.with_letter_phonemes(text)
+    assert out.count("<|phoneme_start|>") == expected_tags
+
+
+def test_forced_phonemes_use_arpabet_letter_names():
+    out = speech.with_letter_phonemes("y equals a plus b")
+    assert "<|phoneme_start|>W AY1<|phoneme_end|>" in out, "the letter Y, not 'ee'"
+    assert "<|phoneme_start|>EY1<|phoneme_end|> plus" in out, "the letter A, not the article"
+
+
+def test_maths_context_holds_no_nouns():
+    """The test for "a" is that an article introduces a noun while a variable sits
+    next to maths. Listing a noun inverts it: with "term" in the set, "missing a
+    middle term" had its article spoken as the letter A."""
+    for noun in ("term", "terms", "middle", "bracket", "brackets", "power", "root"):
+        assert noun not in speech.MATHS_CONTEXT
+
+
+def test_phoneme_tags_stay_out_of_the_stored_script():
+    """`speakable` output is word-counted, persisted and quoted in the docs, so the
+    markup is added on the way to the API and nowhere else."""
+    assert "phoneme" not in speech.speakable("y plus three, all squared")
+
+
 def test_backticks_and_markdown_never_reach_the_voice():
     """Chat renders backticks; a voice reads them out or stumbles."""
     assert speech.speakable("the term `2ab` is **missing**") == "the term two a b is missing"
