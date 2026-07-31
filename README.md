@@ -1,35 +1,77 @@
+<div align="center">
+
 # Astray
 
 **Finds where your math reasoning went astray — then shows you.**
 
-Most math tools tell you the answer is wrong. Astray finds the exact step where
-your reasoning left the correct path, names the false rule you were actually
-applying, and builds an animated explanation of that specific misconception.
+Most tools tell a student the answer is wrong. Astray finds the exact step where
+the reasoning left the correct path, names the false rule behind it, and builds
+an animation of *that* misconception.
 
-Status: **complete end to end.** Submit typed or photographed work, get a
-falsifiable diagnosis, watch an animation generated for your specific error, and
-ask a tutor that cites moments in that animation by timestamp.
+<br>
 
-## What it does today
+<img src="docs/assets/surfaces.gif" width="720" alt="Two surfaces over the same square of inputs: (a+b)² above a²+b², touching along both axes and separating everywhere else, with the camera orbiting.">
 
-A student submits a problem and their own attempted solution (typed, or as a
-photo transcribed by a vision model). Astray:
+**`(a+b)² → a² + b²`** · the two rules as two surfaces, orbiting
 
-1. Solves the problem correctly, independently of the student's work.
-2. Finds the **divergence index** — the first step where the two solutions part.
-3. Names the **false rule** the student appears to be applying, as a rewrite
-   (`(a+b)^2 -> a^2 + b^2`), not as a vague topic label.
-4. Emits a SymPy check that would falsify its own diagnosis, runs it in a
-   sandbox, and **overwrites** its confidence claim with the measured result.
-   The model does not get to certify itself.
-5. Canonicalizes the rule against a growing misconception taxonomy, so the same
-   error made with different letters lands on the same entry — which is what
-   makes cross-session pattern tracking possible.
+</div>
 
-When the work is already correct, Astray says so and stops: the session ends at
-`correct` with no misconception attached. Inventing an error the student did not
-make is treated as exactly as bad as missing a real one, and a "you were right"
-result must never enter their misconception history.
+The sheets **touch along the two axes** and separate everywhere else. That says
+something a derivation cannot: the rule is exactly right whenever one term is
+zero — which is why it feels right, because every case the student ever checked
+was probably one of those — and the gap elsewhere is a solid object with a size.
+
+<div align="center">
+
+<img src="docs/assets/lift.gif" width="720" alt="A composition drawn in three dimensions: one curve whose three shadows are the inner stage on the floor, the outer stage up the wall, and the answer on the back. Evenly spaced marks along x become visibly unequal along u.">
+
+**`d/dx sin(x²) → cos(x²)`** · the hidden middle stage, given an axis
+
+</div>
+
+`sin(x²)` becomes one curve in space whose three shadows are its three stages:
+`u = x²` on the floor, `sin(u)` up the wall, the answer on the back. Step evenly
+along `x` and the steps in `u` come out unequal — and that spacing ratio **is**
+the `2x` a dropped chain-rule factor leaves out. Seen, not asserted.
+
+<div align="center">
+
+<img src="docs/assets/numberline.gif" width="560" alt="A number line with a solution marked at 4, then a second solution appearing at -4.">
+
+**`x² = 16 → x = 4`** · deliberately flat
+
+</div>
+
+Not every error deserves a camera. This one is an *absence* — every line the
+student wrote is true, and the mistake is a missing one. There is nothing to
+cross out, so a second dot arriving where they had nothing is the whole argument.
+A surface here would be spectacle with no content.
+
+Every frame above came out of the real pipeline, from a student's wrong answer.
+Nothing is hand-drawn; `scripts/make_readme_gifs.sh` cuts them straight out of
+rendered sessions.
+
+## How it works
+
+A student submits a problem and their own attempt — typed, or photographed and
+transcribed by a vision model. Then:
+
+1. Astray solves the problem correctly, **independently** of the student's work.
+2. It finds the **divergence index** — the first step where the two part.
+3. It names the **false rule** as a rewrite (`(a+b)^2 -> a^2 + b^2`), not a vague
+   topic label.
+4. It emits a SymPy check that would **falsify its own diagnosis**, runs it in a
+   sandbox, and overwrites its confidence with the measured result. The model
+   does not get to certify itself.
+5. It canonicalizes the rule against a growing taxonomy, so the same error made
+   with different letters lands on the same entry — which is what makes
+   `2 other students made this error` true rather than decorative.
+
+When the work is already correct, Astray says so and stops. Inventing an error
+the student did not make is treated as exactly as bad as missing a real one.
+
+Then the animation is planned, written, validated, rendered and narrated — and
+the tutor chat cites moments in it by timestamp, landing on a frame that exists.
 
 ## The pipeline is Math-To-Manim's, with a diagnosis in front
 
@@ -52,262 +94,47 @@ particular student got wrong.
 | `RenderAgent` | `server/render/runner.py` | `RenderResult` |
 | `ManimCodeAgent.repair()` | `server/render/repair.py` | a bounded repair loop |
 
-Every stage is a typed Pydantic artifact persisted to `run_artifacts` with its own
-token count and cost, which is upstream's "keep LLM output reviewable by emitting
-intermediate artifacts before code" made durable rather than written to a run
-directory.
+Every stage is a typed Pydantic artifact persisted with its own token count and
+cost — upstream's "keep LLM output reviewable by emitting intermediate artifacts
+before code", made durable rather than written to a run directory.
 
-Three things are ours. The chain starts from a **diagnosis** rather than a
-question, so every later stage is told what this student believes rather than what
-the topic is. Scene code is executed in a **sandboxed container behind an AST
-allow-list**, because the prompt chain begins with untrusted student text. And the
-beats the storyboard plans are a **grounding contract** the validator enforces, so
-the chat tutor can cite a moment in the video and land on it.
+Three things are ours:
 
-## Design commitments
+- The chain starts from a **diagnosis** rather than a question, so every later
+  stage is told what this student believes, not what the topic is.
+- Scene code runs in a **sandboxed container behind an AST allow-list**, because
+  the chain begins with untrusted student text.
+- The storyboard's beats are a **grounding contract the validator enforces**, so
+  a chat citation seeks to a moment that actually exists.
 
-**The diagnosis is falsifiable.** Every diagnosis carries a SymPy expression
-whose truth value would disprove it. That check runs deterministically in a
-killable subprocess behind a character allow-list, and its result — not the
-model's claim — is what gets stored as `verified_by_sympy`. A check that cannot
-fail does not count: an equivalence asserting `X == X` is rejected as vacuous,
-because `verified_by_sympy` is what lifts a diagnosis past the unverified
-confidence ceiling and a tautology would launder an unchecked claim into a
-certified one.
+## What makes it hold up
+
+**The diagnosis is falsifiable.** Every diagnosis ships a SymPy expression whose
+truth value would disprove it, run deterministically in a killable subprocess. A
+check that cannot fail is rejected as vacuous — a tautology would launder an
+unchecked claim into a certified one.
+
+**Generated code is untrusted, twice.** An AST allow-list *and* a
+`--network=none`, read-only, non-root container with memory, CPU and PID caps.
+Neither layer is trusted alone. If codegen fails twice, a deterministic renderer
+builds the same beats with no model-authored code at all.
 
 **Student text is untrusted.** Submissions are wrapped in per-request nonce
-delimiters in every prompt, with content-blind neutralization of forged
-delimiter runs. A student can write "ignore your instructions" in their work
-without it becoming an instruction.
+delimiters in every prompt. A student can write "ignore your instructions" in
+their working without it becoming one.
 
-**SymPy is an input boundary, not a calculator.** `parse_expr` calls `eval()`.
-The check runner enforces a character allow-list (no quotes, brackets, attribute
-chains, or dunders) and a killable wall-clock bound, because both RCE and
-non-terminating-power-tower DoS were reproduced against the naive version.
+**The grounding is enforced, not hoped for.** `s6` plans beats, `s7` must wrap
+each in `with beat(self, "bN")`, `s8` fails the render if any is missing or
+computed at runtime, and the container measures every beat's real start and end
+from the renderer clock.
 
-**The animation is grounded, and the grounding is enforced.** `s6` plans beats,
-`s7` must wrap each in `with beat(self, "bN")`, and `s8` fails the render if any
-planned beat is missing, duplicated, or computed at runtime. The container
-measures each beat's real start and end from the renderer clock, so a chat
-citation seeks to a moment that actually exists. Unknown beat ids in a reply are
-stripped server-side rather than shown as dead links.
+**Narration is written after the render, never before.** Only then are the beat
+durations *measured*, and each becomes a word budget the line has to fit. A
+script written from the storyboard would be guessing, and narration that guesses
+talks over the next visual.
 
-`beat()` also holds each beat open to a five second floor, which is a duration
-guarantee rather than a request. A live render came back with no `self.wait()`
-anywhere in the file: six beats, 12.5s of video against a storyboard estimate of
-90, and one beat lasting 0.8 seconds. Two things break at that length and neither
-is cosmetic. A citation into a 0.8s beat points at a moment gone before the
-student can look at it, so grounding stops meaning anything. And the narration
-budget is computed from measured duration, so that beat earns a three word line,
-which is exactly the disconnected-caption failure the narration work exists to
-prevent.
-
-Fixing that by asking for pacing overshot immediately, and the overshoot is the
-more interesting half. Told to reach the storyboard's estimated total, `s7` spent
-it entirely on waiting: `wait(30)`, `wait(35)`, `wait(40)`, `wait(35)`, a 155s video
-of four static frames. The estimate was the problem as much as the instruction,
-since `s6` had asked for 180s over four beats while its own prompt said 45 to 120.
-So the estimate is clamped to a realistic band, and `s7` is handed seconds *per
-beat* rather than a total, which is a length it can reason about instead of a budget
-it feels obliged to exhaust. A generous runtime does not buy more explanation; it
-buys a longer hold on the same picture.
-
-**The storyboard's vocabulary is backed by real builders.** `s6` picks a
-`primitive` per beat, and that choice is what the beat looks like. For a long time
-the enum offered `graph` and `balance` with nothing behind either, so a beat
-choosing one got improvised Manim: no scaling to fit, no ownership of the frame,
-and an unguarded call into whatever function the model named. Measured across
-every stored session, `s6` chose `algebra_steps` for 16 of 19 beats and `graph`
-never once, which is how a misconception tutor ends up explaining calculus with
-white text fading in and out.
-
-There is now a builder for each: an area model that splits a square of side (a+b)
-into `a²`, two `ab` rectangles and `b²` drawn to scale; a graph that plots the
-correct function against the student's on one set of axes; a number line for
-errors that are an *absence*, where nothing exists to cross out. `balance` was
-removed rather than built, because equation solving is already served by
-`algebra_steps` and an option nothing can render is worse than an option that does
-not exist.
-
-**Two of the builders work in three dimensions**, because two of the commonest
-misconceptions are claims about shape rather than about value.
-
-`surface` draws both rules as two sheets over the same square of inputs, with the
-camera orbiting them. For `(a+b)^2 -> a^2 + b^2` the two sheets *touch along the
-two axes* and separate everywhere else, so the frame says something a derivation
-cannot: the rule is exactly right whenever one term is zero, which is why it feels
-right, and the gap elsewhere is a solid object with a size. Its partner
-`gap_pillars` puts a bar between the sheets at the student's own numbers and reads
-off all three — theirs, the truth, the difference.
-
-`lift` gives a composition its middle quantity as an axis. `sin(x²)` becomes one
-curve in space whose three shadows are the three stages: `u = x²` on the floor,
-`sin(u)` up the wall, the answer on the back. Its partner `pace_marks` steps
-evenly along `x` and shows the unequal steps those become in `u` — which is the
-`2x` a dropped chain-rule factor leaves out, seen rather than asserted.
-
-Reaching for either commits the file to a `ThreeDScene`, since there is one camera
-per scene. That is enforced statically rather than requested: a plain `Scene` that
-imports `primitives.space` fails validation before a container starts, because the
-degraded result — surfaces flattened head-on, the near one hiding the far one — is
-a bad video rather than a failed render, and a bad video is the outcome with no
-feedback path.
-
-Which one wins is a property of the misconception. `(a+b)^2 -> a^2 + b^2` survives
-a derivation, because a student who believes it watches the correct expansion,
-agrees with every line, and keeps the belief: the two sides are competing strings.
-It does not survive the square, where the two `ab` rectangles are visibly
-occupying area that `a^2 + b^2` does not account for. A lost root
-(`x^2 = 16 -> x = 4`) is the opposite problem, since every line the student wrote
-is true and the error is a missing one; on a line the absence becomes a place.
-
-**Generated code is untrusted.** It runs behind an AST allow-list (imports
-limited to `manim`, `numpy`, `math`, `primitives`; no dunder attribute access)
-*and* inside a `--network=none`, read-only, non-root container with memory, CPU
-and PID caps and a wall clock enforced twice. Neither layer is trusted alone. If
-codegen fails twice, a deterministic renderer builds the same beats with no
-model-authored code at all.
-
-The primitives are the trusted layer, and they are held to their own line: the
-validator inspects the *generated scene*, never the package that scene imports, so
-an import added to a primitive would pass every existing gate. A test enumerates
-what each one may import beyond the scene allow-list, with the reason attached, so
-widening it is deliberate.
-
-**A primitive owns its frame and never returns a bare tuple.** Both rules were
-written against live failures. Asking generated code to tidy up after itself was
-observed to fail, so every primitive clears the frame before drawing. And
-`compare_rules` used to return `(wrong, right)`: a scene assigned that to a
-variable, called `FadeOut` on it, and died with `TypeError: Animation only works on
-Mobjects`. Returning a `VGroup` serves both callers, since a `VGroup` is iterable,
-so `wrong, right = compare_rules(...)` and `FadeOut(result)` are now the same
-object.
-
-The same reasoning pushed type tolerance into the primitives rather than the
-prompt. Generated code called `compare_rules(self, [MathTex(...)], ...)`, which is
-a fair reading of "lines of maths"; `MathTex` accepted the Mobject, stringified it,
-and typeset its repr, so the misconception beat read
-`MathTex('fracdydx = cos(x^2)')` in crossed-out red and the render was recorded as
-a success. The `Text` fallback that exists to survive bad LaTeX is what concealed
-it, by turning a loud `TypeError` into a quiet wrong frame.
-
-**Secrets never leave the server.** Keys live only in a gitignored `server/.env`.
-Upstream error text never reaches a client — a DeepSeek error body once reflected
-the `Authorization` header straight through to the SSE stream.
-
-**Model text is rendered, never injected.** The tutor writes markdown. The
-client tokenises it and builds the elements itself, so bullets, bold and inline
-code become real formatting without a reply ever being parsed as markup.
-
-## Narration
-
-The video gets a spoken track, and the ordering is the whole design: the script
-is written **after** the render, not before it. Only then are the beat timings
-measured, and a script written from the storyboard would be guessing at how long
-each beat lasts. Narration that guesses is narration that talks over the next
-visual.
-
-So each beat's measured duration becomes a word budget the line has to fit, the
-clips are placed at the beats' measured starts, and the mix is muxed in without
-re-encoding the video. Two clips never overlap: a line that outruns its beat
-pushes the next one later rather than talking over it, because two voices at once
-is unintelligible while a line arriving a fraction late is barely noticeable and
-self-corrects at the next beat with spare room. Audio is never time-stretched to
-fit, which is the artificial sound this feature exists to avoid.
-
-Sounding natural turns out to be mostly a text problem rather than a model one.
-Handed `(y+3)^2`, every engine says "caret two" or nothing. So the prompt asks
-for maths the way a teacher says it out loud, and `server/audio/speech.py` is the
-net for what slips through: `(y+3)^2` becomes "y plus three, all squared", `6y`
-becomes "six y", `2ab` becomes "two a b". "All squared" is the phrase the whole
-product turns on, because it is what distinguishes the correct expansion from the
-misconception. Punctuation is left alone deliberately, since it is the only
-control over where the voice breathes.
-
-Two things decide whether this sounds like a tutor or like a machine, and both
-were learned the hard way.
-
-**One voice, pinned.** Every beat is a separate API request, so leaving
-`reference_id` unset gives a six-beat video six different narrators. The voice is
-chosen on measured evidence rather than taste: `scripts/measure_voice.py`
-synthesises a fixed set of lines and reports words per second and its spread, and
-across five candidates the same two sentences ranged from 7.7s to 10.5s. The
-budget is calibrated to whichever voice is pinned, set just under its *slowest*
-line, because every voice measured slows markedly on dense spoken maths.
-
-**One explanation, not six captions.** The first version passed the model only a
-rule name and a one-line statement, and capped each beat at about ten words in
-isolation. It produced exactly what you would expect: six disconnected fragments
-like "They got y squared plus nine." The prompt now carries the problem, the
-student's own working, the correct steps and the diagnosis evidence, shows a
-worked example of the standard to match, and gives each beat a word *target* as
-well as a maximum. A cap alone reads as a floor: told only "at most N words", the
-model writes a caption and leaves the animation playing in silence.
-
-The other half of that fix is not in the narration code at all. A word budget is
-computed from a beat's measured duration, so a short beat cannot hold a sentence
-however good the prompt is, and `beat()`'s five second floor is what guarantees
-there is a sentence's worth of room to write into.
-
-**Every variable gets forced phonemes.** A lone letter is genuinely ambiguous to
-a TTS model and it guesses badly: "a" is the commonest word in English so it comes
-out as the article, and "y" collapses toward "ee". Fish supports phoneme control,
-so `speech.with_letter_phonemes` wraps single-letter variables in
-`<|phoneme_start|>W AY1<|phoneme_end|>` style CMU Arpabet on the way to the API.
-
-Only "a" and "i" need evidence before being treated as variables, since they are
-the only single letters that are also English words: they are tagged when they sit
-next to an operator or another variable, and left alone otherwise. The maths-context
-set deliberately contains no nouns, because the test is that an article introduces a
-noun while a variable sits next to maths, and listing "term" inverted it and spoke
-the article in "missing a middle term" as the letter A.
-
-The tags are markup, not text, so they are added at the API boundary only: what
-gets word-counted, stored and quoted in the docs stays readable. They are also
-billed, since Fish charges per character, which roughly doubles a video's narration
-cost to about $0.013.
-
-Narration is non-fatal. A silent video is a working session; a render discarded
-because a voice API was down is not, so every failure logs and leaves the
-original video in place. It republishes over the render's own path and keeps the
-untouched original beside it as `silent.mp4`, which is what makes the step safe to
-re-run: a second pass reads that copy instead of handing ffmpeg its own previous
-output.
-
-Set `FISH_MODEL=s2.1-pro-free` (the default) for the free developer tier. The paid
-`s2.1-pro` string returns HTTP 402 unless the account holds *API* credit, which
-Fish bills separately from platform credit.
-
-## The interface
-
-One dark appearance, because every screen frames a Manim render on black and a
-light shell around it reads as a hole in the page. Token names follow shadcn/ui
-conventions (`--background`, `--card`, `--primary`, `--muted-foreground`,
-`--border`, `--ring`) so the vocabulary is a familiar one, and the visual
-language is the one Aceternity popularised: an aurora wash behind glass panels,
-a cursor-tracked spotlight, a conic border beam, a shimmer across the primary
-action. All of it is hand-written CSS. There is no build step, and adding React,
-Tailwind and Framer Motion to a working vanilla frontend would have meant
-rebuilding the verified grounding client to arrive at the same pixels.
-
-Two hues carry meaning and nothing else does: coral is the student's error and
-the one primary action per view, green means a machine checked it. The violet
-and teal in the aurora are decorative and never appear on a control, a state or
-a value, so a coloured pixel still always means something.
-
-Every foreground/background pair is measured rather than eyeballed, including
-the worst case of a translucent card composited over the brightest point of the
-aurora. `--foreground-2` clears APCA Lc 75 on every surface, `--muted-foreground`
-clears 60, and `--primary` sits at lightness 0.780 for an unobvious reason: a
-saturated warm hue has very little contrast headroom, and that is the lightness
-where a near-black label on the filled button finally clears 60. No lightness of
-that hue reaches 75, which is why coral is never a body-text colour anywhere in
-the app: the false rule gets a coral rule down its edge, not coral text.
-
-Motion is expressive where it is rare (a view entrance, the diagnosis landing)
-and nearly invisible where it repeats (hover, focus, typing). Every animated
-state change also has a static cue, so `prefers-reduced-motion` switches the
-whole system off without losing information.
+The failures behind each of these — and the ones that cost a render before they
+were fixed — are in **[docs/DESIGN.md](docs/DESIGN.md)**.
 
 ## Running it
 
@@ -319,71 +146,78 @@ cp server/.env.example server/.env   # then add your DeepSeek key
 uv run uvicorn server.app:create_app --factory --port 8000
 ```
 
-Set `FAKE_LLM=1` to run against canned responses with no network and no cost.
+`FAKE_LLM=1` runs the whole chain against canned responses — no network, no cost.
+`RENDER_ENABLED=0` plans animations without running containers; beats still exist,
+so chat stays grounded by title. Rendering itself needs Docker and
+`manimcommunity/manim:stable`.
 
 ### API
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/health` | Liveness, plus whether vision input is configured |
 | `POST` | `/api/sessions` | Create a session from typed problem + work |
-| `POST` | `/api/sessions/{id}/photo` | Transcribe handwritten work into the session |
-| `PUT` | `/api/sessions/{id}/submission` | Confirm/correct the transcription before diagnosis |
-| `GET` | `/api/sessions/{id}` | Session state and diagnosis, if ready |
+| `POST` | `/api/sessions/{id}/photo` | Transcribe handwritten work |
+| `PUT` | `/api/sessions/{id}/submission` | Confirm the transcription before diagnosis |
 | `GET` | `/api/sessions/{id}/stream` | SSE: diagnosis, then s2–s8 and the render |
 | `GET` | `/api/sessions/{id}/beats` | Beat rail: plan plus measured timings |
 | `GET` | `/media/{id}/video.mp4` | The rendered animation (range requests) |
 | `POST` | `/api/sessions/{id}/chat` | Grounded reply citing `[beat:bN]` |
-| `GET` | `/api/sessions/{id}/peers` | "N other students made this error" |
 | `GET` | `/api/insights` | Misconception frequency and personal history |
 
 `/stream` claims a session with a compare-and-swap, so concurrent connections
-cannot double-bill the same run; reconnecting to a finished session replays the
-stored result rather than re-running it.
-
-Photo input is never diagnosed until the student confirms it. Transcribed steps
-are delimiter-free LaTeX (`x^{2} + 25 = 36`, not `$x^{2} + 25 = 36$`), normalized
-server-side so the format does not vary between calls, and meant to be rendered
-with KaTeX in the review field.
+cannot double-bill a run; reconnecting to a finished session replays the stored
+result rather than re-running it.
 
 ## Development
 
 ```bash
 uv run pytest          # 597 tests; no network and no Docker — both are mocked
-uv run ruff check .
-uv run ruff format --check .
-uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model
+uv run ruff check . && uv run ruff format --check .
 ```
 
-The eval harness scores rule match, topic match, and SymPy verification rate.
-Rule match is currently **not** a trustworthy gate — see the plan's Definition
-of Done for why the scorer rejects substantively correct diagnoses on notation.
-Topic match and verification rate are reliable.
-
-Three scripts cover what a test cannot reach, because the interesting failures in
-this pipeline are visual and the primitives import `manim`, which exists only
-inside the render image:
+The interesting failures here are *visual*, and the primitives import `manim`,
+which exists only inside the render image — so three scripts cover what a test
+cannot reach:
 
 ```bash
 uv run python scripts/check_primitives.py            # every primitive, one frame each
 uv run python scripts/check_primitives.py --pass space   # just the 3D ones
 uv run python scripts/run_session.py --preset binomial   # a whole session, real calls
-uv run python scripts/seed_chat.py <session-id>      # grounded chat for a demo
 ```
 
-`check_primitives.py` renders every helper through the real sandbox and writes one
-PNG per beat. It deliberately includes the abuse the live pipeline produced as well
-as the correct usage: a Mobject where a string belongs, a function with a pole
-inside the plot window, a label too wide for its cell. Each of those cost a render
-or a frame before it was handled.
+`check_primitives.py` deliberately includes the abuse the live pipeline produced
+as well as the correct usage: a Mobject where a string belongs, a function with a
+pole inside the plot window, a label too wide for its cell. Each cost a render or
+a frame before it was handled.
 
-`run_session.py` runs one problem end to end with real model calls and a real
-container, which is how the storyboard's primitive choices were actually measured
-rather than assumed.
+```bash
+uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model
+```
 
-Rendering needs Docker and `manimcommunity/manim:stable`. Set `RENDER_ENABLED=0`
-to plan animations without running containers — the pipeline still produces beats,
-so chat stays grounded by title.
+Rule match is **not** currently a trustworthy gate — the scorer rejects
+substantively correct diagnoses on notation, and that number is left honest
+rather than tuned. Topic match and verification rate are reliable.
 
-Design and plan documents live in `docs/superpowers/`. `DEMO.md` names the
-prepared session to open, and what is and is not live in it.
+## Honest limits
+
+- The wake phrase is Web Speech API inside the page. Close the tab and it stops;
+  background the tab and Chrome's timer throttling stretches the restart gaps.
+  The state machine is tested against a stubbed recognizer — **the acoustic path
+  has never been verified against a real microphone.**
+- Wake detection is edit distance on a general transcript, not a trained keyword
+  model, so it misses and misfires more than a real assistant would.
+- Idle listening streams audio to Google's servers. That is why muting is a
+  first-class control rather than a buried preference.
+- Session history is keyed by a random handle in `localStorage`. No accounts —
+  which means the history follows the browser profile, not the person.
+
+## Layout
+
+```
+server/charter/     s2–s8 stage prompts and typed contracts
+server/render/      primitives, AST validator, container runner, repair loop
+server/audio/       narration: budgeting, spoken-maths, phonemes, muxing
+web/                vanilla JS client — no build step
+docs/DESIGN.md      why it is the way it is
+DEMO.md             the prepared sessions, and what is live in them
+```
