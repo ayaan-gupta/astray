@@ -1,0 +1,18 @@
+{
+ "messages": [
+  {
+   "role": "user",
+   "content": "Why doesn't my rule work?",
+   "cited_beats": []
+  },
+  {
+   "role": "assistant",
+   "content": "Your rule `d/dx sin(f(x)) = cos(f(x))` is almost right, but it leaves out the derivative of the inside function. The chain rule says you must multiply by `f'(x)`.\n\nLook at [beat:b4], that moment shows what happens if you skip that factor: at a specific point the slope is wrong. Then [beat:b2] walks through the correct steps, and [beat:b3] gives a visual of how the two rates multiply. The missing piece is the `2x` from `x^2`, so the correct answer is `2x cos(x^2)`.",
+   "cited_beats": [
+    "b4",
+    "b2",
+    "b3"
+   ]
+  }
+ ]
+}

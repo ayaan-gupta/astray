@@ -1,0 +1,6 @@
+{
+ "misconception_id": 19,
+ "slug": "chain-rule-omitted",
+ "statement": "Differentiates the outer function without the inner derivative.",
+ "others": 0
+}

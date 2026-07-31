@@ -1,0 +1,1432 @@
+/* Astray design system.
+ *
+ * Token names follow shadcn/ui conventions (--background, --card, --primary,
+ * --muted-foreground, --border, --ring, --radius) so the vocabulary is one a
+ * reader already knows, and every component below is composed from that set
+ * rather than from ad-hoc values. The visual language is the one Aceternity
+ * popularised: an aurora wash behind glass panels, a cursor-tracked spotlight,
+ * a conic border beam on the single most important surface, a shimmer that
+ * crosses the primary action. It is hand-written CSS because this project has
+ * no build step, and adding React, Tailwind and Framer Motion to a working
+ * vanilla frontend would mean rebuilding the verified grounding client to
+ * arrive at the same pixels.
+ *
+ * Colour is measured, not eyeballed. Every text-on-background pair here was run
+ * through APCA (0.98G-4g) and holds Lc >= 75 for body copy and Lc >= 60 for
+ * large or secondary text, including the worst case of a translucent card
+ * composited over the brightest point of the aurora. Two hues carry meaning and
+ * nothing else does: coral is the student's error, green is a machine-verified
+ * fact. The violet and teal in the aurora are decorative and never appear on a
+ * control, a state, or a value.
+ *
+ * Motion follows one rule. Expressive where it is rare (a view entrance, the
+ * diagnosis landing), nearly invisible where it repeats (hover, focus, typing).
+ * Every animated state change also has a static cue, so the whole system can be
+ * switched off by prefers-reduced-motion without losing information.
+ */
+
+/* ------------------------------------------------------------------- tokens */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces. Cards are translucent so the aurora reads through them, at an
+   * alpha high enough that the composite never moves measured text contrast by
+   * more than ~2 Lc away from the opaque value. */
+  --background:   oklch(0.148 0.008 274);
+  --background-2: oklch(0.183 0.009 274);
+  --card:         oklch(0.216 0.009 274 / 0.86);
+  --card-solid:   oklch(0.216 0.009 274);
+  --muted:        oklch(0.262 0.009 274);
+  --muted-hover:  oklch(0.300 0.010 274);
+  --popover:      oklch(0.232 0.010 274);
+
+  /* Text. Measured on --card: 0.967 -> Lc 92, 0.856 -> Lc 76, 0.775 -> Lc 64.
+   * --muted-foreground never carries body copy. */
+  --foreground:       oklch(0.967 0.003 274);
+  --foreground-2:     oklch(0.856 0.008 274);
+  --muted-foreground: oklch(0.775 0.011 274);
+
+  /* Lines. Pure white alpha, never a tinted neutral: a tinted hairline picks up
+   * the surface beneath it and reads as grime along the edge.
+   *
+   * --input is dramatically lighter than --border, and measurement is why. The
+   * card is already close to black, so darkening it to make a field well barely
+   * moves luminance at all: the 24%-black fill measures 1.05:1 against the card,
+   * which is invisible. The border is therefore the only thing saying "you can
+   * type here", not a reinforcement of the fill, so it has to carry the whole
+   * cue on its own. 0.60 clears both WCAG 1.4.11's 3:1 (it reaches 7.0:1) and
+   * APCA Lc 45 against the card, the field fill, and the bare background, so an
+   * input placed outside a card later is still compliant. */
+  --border:        oklch(1 0 0 / 0.08);
+  --border-strong: oklch(1 0 0 / 0.15);
+  --input:         oklch(1 0 0 / 0.60);
+  --input-hover:   oklch(1 0 0 / 0.72);
+  --ring:          oklch(0.862 0.058 250);
+
+  /* Brand coral, taken from the mark. L sits at 0.780 because a saturated warm
+   * hue has very little contrast headroom: this is where a near-black label on
+   * the filled button finally clears APCA 60 (it reaches 62.7, and no lightness
+   * of this hue reaches 75). Chroma is capped at the sRGB gamut boundary for
+   * that lightness. --primary is therefore never a body-text colour. */
+  --primary:            oklch(0.780 0.129 29.2);
+  --primary-hover:      oklch(0.830 0.095 29.2);
+  --primary-foreground: oklch(0.140 0.045 29.2);
+  --primary-soft:       oklch(0.780 0.129 29.2 / 0.13);
+  --primary-soft-2:     oklch(0.780 0.129 29.2 / 0.20);
+  --primary-line:       oklch(0.780 0.129 29.2 / 0.42);
+  --primary-glow:       oklch(0.780 0.129 29.2 / 0.28);
+
+  /* Only ever means "SymPy ran and agreed". */
+  --success:      oklch(0.812 0.152 152);
+  --success-soft: oklch(0.812 0.152 152 / 0.12);
+  --success-line: oklch(0.812 0.152 152 / 0.32);
+
+  /* Decorative only. */
+  --aurora-a: oklch(0.68 0.20 28);
+  --aurora-b: oklch(0.60 0.20 288);
+  --aurora-c: oklch(0.66 0.14 208);
+
+  /* Radii. Nested surfaces are concentric: outer = inner + padding. */
+  --radius-xs:   6px;
+  --radius-sm:   9px;
+  --radius:      13px;
+  --radius-lg:   20px;
+  --radius-xl:   26px;
+  --radius-full: 999px;
+
+  /* Elevation is a ring plus depth rather than a border, so one token works
+   * over the card, the aurora and the video without being redesigned per
+   * background. Structural lines stay real borders. */
+  --ring-1:      0 0 0 1px oklch(1 0 0 / 0.08);
+  --shadow-sm:   var(--ring-1), 0 1px 2px oklch(0 0 0 / 0.30);
+  --shadow-card: var(--ring-1), 0 1px 2px oklch(0 0 0 / 0.24),
+                 0 16px 40px -24px oklch(0 0 0 / 0.60);
+  --shadow-pop:  var(--ring-1), 0 12px 36px -12px oklch(0 0 0 / 0.70);
+  --shadow-glow: 0 0 0 1px var(--primary-line), 0 8px 30px -10px var(--primary-glow);
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@property --beam {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button { font: inherit; cursor: pointer; }
+
+::selection { background: var(--primary-soft-2); color: var(--foreground); }
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ----------------------------------------------------------------- backdrop */
+/* Two fixed decorative layers beneath everything. The aurora is three blurred
+ * radial washes drifting on a long loop; the grid is a 1px lattice masked to
+ * dissolve before it reaches any edge, so it never ends in a visible seam.
+ * Neither is interactive and both are hidden from assistive tech. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, oklch(1 0 0 / 0.032) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(1 0 0 / 0.032) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(ellipse 80% 58% at 50% 0%, #000 18%, transparent 76%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 58% at 50% 0%, #000 18%, transparent 76%);
+}
+
+/* The washes are already soft (each gradient is fully transparent by 66%), so
+ * the blur only has to smooth the banding. A large radius here is the most
+ * expensive thing on the page and this is a screen that plays video, so it is
+ * kept to the smallest value that still looks continuous. */
+.aurora {
+  position: absolute;
+  inset: -28% -20% auto -20%;
+  height: 128%;
+  filter: blur(46px);
+  opacity: 0.4;
+}
+
+/* Transform only, so the drift stays on the compositor and never triggers
+ * layout or paint. */
+.aurora span {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  animation: drift 30s var(--ease) infinite alternate;
+}
+
+.aurora span:nth-child(1) {
+  inset: 2% auto auto 5%;
+  width: 46vw;
+  height: 42vw;
+  background: radial-gradient(circle, var(--aurora-a), transparent 66%);
+}
+
+.aurora span:nth-child(2) {
+  inset: -8% 2% auto auto;
+  width: 40vw;
+  height: 40vw;
+  background: radial-gradient(circle, var(--aurora-b), transparent 66%);
+  animation-duration: 38s;
+  animation-delay: -12s;
+}
+
+/* Kept below the headline band on purpose. Sitting this one directly behind the
+ * display type lifted the background right where the second line falls, which
+ * cost the headline visible contrast even though the text colour never changed.
+ * It now washes the cards instead, where the surfaces are opaque enough to stop
+ * it reaching the text. */
+.aurora span:nth-child(3) {
+  inset: 56% auto auto 30%;
+  width: 34vw;
+  height: 26vw;
+  background: radial-gradient(circle, var(--aurora-c), transparent 68%);
+  animation-duration: 34s;
+  animation-delay: -22s;
+}
+
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(6%, 4%, 0) scale(1.16); }
+}
+
+/* ------------------------------------------------------------------- topbar */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 13px clamp(18px, 4vw, 44px);
+  background: oklch(0.148 0.008 274 / 0.72);
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { display: flex; align-items: center; border-radius: var(--radius-sm); outline-offset: 4px; }
+.brand img { display: block; height: 26px; width: auto; }
+
+.nav {
+  display: flex;
+  gap: 3px;
+  margin-inline-start: auto;
+  padding: 3px;
+  background: oklch(1 0 0 / 0.04);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* Concentric: a 13px shell with 3px padding gives a 10px inner radius. */
+.nav a {
+  padding: 6px 14px;
+  border-radius: 10px;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-decoration: none;
+  transition-property: color, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.nav a:hover { color: var(--foreground); background: oklch(1 0 0 / 0.05); }
+.nav a.is-active { color: var(--foreground); background: var(--muted); box-shadow: var(--shadow-sm); }
+
+/* ------------------------------------------------------------------- layout */
+main { display: block; }
+main:focus { outline: none; }
+
+.pane {
+  width: 100%;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 56px) clamp(18px, 4vw, 44px) 96px;
+}
+
+.pane-narrow { max-width: 760px; }
+
+/* Section rhythm. The gap between groups is more than double the gap inside
+ * one, so grouping is carried by space rather than by rules. */
+.pane > * + * { margin-top: 26px; }
+.pane > .hero + * { margin-top: 40px; }
+
+/* --------------------------------------------------------------------- hero */
+.hero { padding-block: clamp(6px, 3vw, 24px) 4px; }
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 14px;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  /* Sentence case, and no tracking beyond the face's own. Wide tracking is a
+   * fix for a problem all-caps creates -- caps are uniform-height blocks that
+   * jam together -- so carrying it over to sentence case just pulls the word
+   * apart. The size goes up 1px because lowercase reads smaller than caps at
+   * the same point size. */
+  letter-spacing: 0;
+}
+
+/* The sprite is a definitions-only <svg>: it must be in the document for <use>
+ * to resolve, and must never occupy a line box. */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Sized a little larger than the artwork it replaces. The small-size cut has
+ * four strokes instead of eight, so it can afford the room, and it needs it:
+ * the arms are ~23 of 248 units thick, which is only just over a pixel once
+ * this is 14px tall. */
+.eyebrow-mark { display: block; flex: 0 0 auto; width: 15px; height: 15px; }
+
+.display {
+  margin: 0;
+  max-width: 23ch;
+  font-size: clamp(34px, 5.4vw, 52px);
+  font-weight: 640;
+  line-height: 1.06;
+  letter-spacing: -0.032em;
+  text-wrap: balance;
+  /* Near-white at the top falling slightly at the bottom reads as light across
+   * the type. The falloff is deliberately shallow: at a deeper bottom stop a
+   * two-line headline reads as though its second line were de-emphasised
+   * rather than lit, and the stop stays well above the body-text floor. */
+  background: linear-gradient(180deg, var(--foreground) 46%, oklch(0.905 0.006 274));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Without clip-to-text support, `color: transparent` would erase the headline
+ * rather than degrade it. */
+@supports not ((background-clip: text) or (-webkit-background-clip: text)) {
+  .display { background: none; color: var(--foreground); }
+}
+
+.lede {
+  margin: 18px 0 0;
+  max-width: 58ch;
+  color: var(--foreground-2);
+  font-size: 16.5px;
+  line-height: 1.62;
+  text-wrap: pretty;
+}
+
+/* -------------------------------------------------------------------- cards */
+.card {
+  position: relative;
+  padding: clamp(20px, 2.6vw, 28px);
+  background: var(--card);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.card-title {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+.card-head { margin-bottom: 18px; }
+.card-head .card-title + .field-hint { margin-top: 5px; }
+
+/* Cursor spotlight. --mx/--my are written by app.js on pointermove; the layer
+ * is a soft radial that follows the pointer and fades in on hover. Opacity is
+ * the only animated property, at 200ms, so a high-frequency hover costs almost
+ * nothing. Without a pointer the vars never set and nothing appears. */
+.card-lit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    460px circle at var(--mx, 50%) var(--my, 0%),
+    var(--primary-soft-2),
+    transparent 68%
+  );
+  /* Behind the content, not over it. A positioned pseudo-element paints above
+   * the card's non-positioned in-flow content, so this layer used to sit on top
+   * of the inputs and the textarea: `screen` spared the near-white text, which
+   * is already at the ceiling, but the fields' own surface is a translucent
+   * dark (`oklch(0 0 0 / 0.24)`) and screen can only lighten, so the glow
+   * washed coral straight across every box it passed under.
+   *
+   * A negative z-index paints in the step between the element's own background
+   * and its in-flow content, which is exactly the band this belongs in: above
+   * the card surface it is meant to light, below every field and every line of
+   * type. It stays inside the card because the card's backdrop-filter makes it
+   * a stacking context, so -1 cannot escape to sit behind the page. */
+  z-index: -1;
+  /* Kept, and now unambiguous: the only thing left beneath this layer is the
+   * card surface, so `screen` lightens that and nothing else. */
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+  pointer-events: none;
+}
+
+.card-lit:hover::before { opacity: 1; }
+
+/* Border beam: a conic sweep clipped to a 1px ring by masking the content box
+ * out of the padding box. Applied to exactly one surface in the product, the
+ * diagnosis, which is the entire reason the page exists. */
+.card-beam::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--beam),
+    transparent 0deg 62deg,
+    var(--primary-line) 84deg,
+    var(--primary) 92deg,
+    var(--primary-line) 100deg,
+    transparent 122deg 360deg
+  );
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  animation: beam 5.5s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes beam { to { --beam: 360deg; } }
+
+/* ----------------------------------------------------------------- controls */
+.btn {
+  --btn-bg: var(--muted);
+  --btn-fg: var(--foreground);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  min-height: 42px;
+  overflow: hidden;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border: 0;
+  border-radius: var(--radius);
+  font-size: 14.5px;
+  font-weight: 570;
+  letter-spacing: -0.008em;
+  box-shadow: var(--shadow-sm);
+  transition-property: background-color, box-shadow, scale, color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.btn:hover:not(:disabled) { --btn-bg: var(--muted-hover); }
+.btn:active:not(:disabled) { scale: 0.96; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: var(--ring-1); }
+
+.btn-primary {
+  --btn-bg: var(--primary);
+  --btn-fg: var(--primary-foreground);
+  font-weight: 600;
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-primary:hover:not(:disabled) {
+  --btn-bg: var(--primary-hover);
+  box-shadow: 0 0 0 1px var(--primary), 0 10px 34px -8px var(--primary-glow);
+}
+
+/* Shimmer: a highlight band crossing the fill once per hover. Transform only,
+ * and it never loops, so it reads as a response to the pointer rather than an
+ * animation competing for attention. */
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 42%, oklch(1 0 0 / 0.34) 50%, transparent 58%);
+  transform: translateX(-110%);
+  pointer-events: none;
+}
+
+.btn-primary:hover:not(:disabled)::after {
+  transform: translateX(110%);
+  transition: transform 680ms ease-out;
+}
+
+.btn-quiet {
+  --btn-bg: transparent;
+  --btn-fg: var(--foreground-2);
+  box-shadow: inset 0 0 0 1px var(--input);
+  text-decoration: none;
+}
+
+.btn-quiet:hover:not(:disabled) { --btn-bg: oklch(1 0 0 / 0.05); --btn-fg: var(--foreground); }
+
+.btn-send { flex: 0 0 auto; width: 42px; padding: 0; }
+
+/* The microphone, in four states.
+ *
+ * This is the whole reason the styling is worth this much room. The microphone
+ * can now be open without anyone having pressed anything, and a student who
+ * cannot tell at a glance whether it is listening will read the feature as
+ * either broken or sinister. So each state differs in more than one channel:
+ *
+ *   off        slashed glyph, quiet surface        -- a different shape, not a dimmer colour
+ *   armed      accent outline, slow breath          -- present, not demanding
+ *   capturing  filled accent, ring pulsing outward  -- the loudest thing in the composer
+ *   suspended  dimmed, no motion                    -- visibly stood down
+ *
+ * Shape carries `off` because colour alone would leave a colour-blind student
+ * with two indistinguishable quiet buttons, and `off` is the state whose
+ * misreading matters most. */
+.btn-mic { flex: 0 0 auto; width: 42px; padding: 0; }
+
+/* The slash only exists when muted. */
+.mic-slash { display: none; }
+.btn-mic.is-off .mic-slash { display: inline; }
+
+/* Armed: listening, and saying so without competing with the send button.
+ * An outline and a slow breath, against the filled accent of a live capture. */
+.btn-mic.is-armed {
+  --btn-fg: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+}
+
+.btn-mic.is-armed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--primary);
+  animation: mic-breathe 2.8s var(--ease) infinite;
+  pointer-events: none;
+}
+
+.btn-mic.is-live {
+  --btn-bg: var(--primary);
+  --btn-fg: var(--primary-foreground);
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-mic.is-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px var(--primary);
+  animation: mic-pulse 1.6s var(--ease) infinite;
+  pointer-events: none;
+}
+
+/* Stood down while the tutor is talking. Deliberately inert: no pulse, no
+ * breath, because the point of the state is that nothing is being heard. */
+.btn-mic.is-suspended { opacity: 0.45; }
+
+@keyframes mic-pulse {
+  from { opacity: 0.85; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.42); }
+}
+
+@keyframes mic-breathe {
+  0%, 100% { opacity: 0.15; }
+  50%      { opacity: 0.9; }
+}
+
+/* Motion is the redundant channel here, never the only one: every state is also
+ * a fill, a glyph and an accessible name. Dropping it costs nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .btn-mic.is-live::after { animation: none; opacity: 0.85; }
+  .btn-mic.is-armed::after { animation: none; opacity: 0.6; }
+}
+
+/* The wake toggle: the mute control, and the only place the state is written in
+ * words. Small, quiet, and never the thing you notice first -- but a student who
+ * wants to know whether the microphone is open should never have to interpret an
+ * icon to find out. */
+.wake {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-inline-start: auto;
+  padding: 5px 10px 5px 8px;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 550;
+  transition-property: color, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.wake:hover:not(:disabled) { color: var(--foreground-2); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.wake:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.wake.is-on { color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary-line); }
+
+.wake-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  transition: background-color 140ms ease-out;
+}
+
+.wake.is-on .wake-dot {
+  background: var(--primary);
+  animation: mic-breathe 2.8s var(--ease) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wake.is-on .wake-dot { animation: none; }
+}
+
+/* A play or arrow glyph sits right of its own optical centre, so a trailing
+ * icon needs slightly less padding on its side than the text side. */
+.btn-icon-end { padding-inline: 18px 15px; }
+
+/* Tabs, APG pattern. The selected tab is a filled surface rather than an
+ * underline, so selection survives without colour. */
+.tabs {
+  display: inline-flex;
+  gap: 3px;
+  margin-bottom: 24px;
+  padding: 3px;
+  background: oklch(1 0 0 / 0.04);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.tab {
+  padding: 7px 15px;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  font-weight: 550;
+  min-height: 34px;
+  transition-property: color, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.tab:hover { color: var(--foreground); }
+.tab.is-active { background: var(--muted); color: var(--foreground); box-shadow: var(--shadow-sm); }
+
+/* ------------------------------------------------------------------- fields */
+.field + .field { margin-top: 20px; }
+
+/* A class, not `.field > label`: the drop zone is itself a <label> for the same
+ * input, and an element selector wins on specificity and would force it back to
+ * display:block, collapsing its stacked lines onto one. */
+.field-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--foreground-2);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.field-hint {
+  margin: 0 0 9px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+input, textarea {
+  width: 100%;
+  padding: 11px 14px;
+  background: oklch(0 0 0 / 0.24);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  font-family: var(--sans);
+  /* 16px stops iOS Safari zooming the viewport on focus. */
+  font-size: 16px;
+  line-height: 1.5;
+  transition-property: border-color, box-shadow, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+@media (min-width: 640px) { input, textarea { font-size: 14.5px; } }
+
+input.mono, textarea.mono, .review-lines input {
+  font-family: var(--mono);
+  letter-spacing: -0.01em;
+}
+
+textarea { resize: vertical; min-height: 118px; line-height: 1.65; }
+
+/* Placeholders here are worked examples of the notation rather than labels
+ * (every field has a visible <label>), so they are held to the same Lc 60 the
+ * rest of the non-body text meets instead of faded into decoration. */
+input::placeholder, textarea::placeholder { color: var(--muted-foreground); opacity: 1; }
+
+/* Brighter than --input, not dimmer. --border-strong is a decorative hairline
+ * and sits far below --input, so reusing it here would dim the border on hover. */
+input:hover, textarea:hover { border-color: var(--input-hover); }
+
+input:focus, textarea:focus {
+  outline: none;
+  background: oklch(0 0 0 / 0.32);
+  border-color: var(--primary-line);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+form > .btn { margin-top: 24px; }
+
+/* ---------------------------------------------------------------- drop zone */
+.drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 168px;
+  padding: 30px 24px;
+  background: oklch(0 0 0 / 0.18);
+  border: 1px dashed var(--input);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  cursor: pointer;
+  transition-property: border-color, background-color, color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.drop:hover, .drop.is-over {
+  background: var(--primary-soft);
+  border-color: var(--primary-line);
+  border-style: solid;
+}
+
+.drop-icon { display: block; color: var(--muted-foreground); transition: color 150ms ease-out; }
+.drop:hover .drop-icon, .drop.is-over .drop-icon { color: var(--primary); }
+.drop-text { color: var(--foreground-2); font-size: 14px; font-weight: 540; }
+.drop-sub { color: var(--muted-foreground); font-size: 12.5px; }
+
+/* The real input is visually hidden, so its focus ring has to land on the
+ * label that stands in for it. */
+#photo-file:focus-visible + .drop { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.review { margin-top: 26px; padding-top: 26px; border-top: 1px solid var(--border); }
+.review-lines { display: grid; gap: 8px; margin: 14px 0 20px; }
+.review-lines input { font-size: 14px; }
+.review-problem { font-weight: 600; }
+/* The steps are subordinate to the problem, so they sit one step in. */
+.review-step { width: calc(100% - 18px); margin-inline-start: 18px; }
+
+.err {
+  margin: 18px 0 0;
+  padding: 11px 15px;
+  background: var(--primary-soft);
+  border-inline-start: 2px solid var(--primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  /* Full ink, not --foreground-2: on the coral tint that step measures Lc 73.7,
+   * just under the body floor, and an error message is the last text in the app
+   * that should be hard to read. */
+  color: var(--foreground);
+  font-size: 13.5px;
+}
+
+.err:empty { display: none; }
+
+/* ---------------------------------------------------------------- diagnosis */
+.diagnosis { overflow: hidden; }
+
+.diagnosis.is-pending {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted-foreground);
+}
+
+.diagnosis.is-pending p { margin: 0; font-size: 14.5px; }
+
+.diagnosis h1 {
+  margin: 0;
+  max-width: 26ch;
+  font-size: clamp(25px, 3.2vw, 33px);
+  font-weight: 640;
+  line-height: 1.12;
+  letter-spacing: -0.026em;
+  text-wrap: balance;
+}
+
+/* :not(.eyebrow) because the eyebrow is also a direct <p> child and an
+ * element-bearing selector would out-specify .eyebrow's own margins. */
+/* The wordmark set inside a line of type.
+ *
+ * Every number here comes from the artwork's measured metrics rather than from
+ * eyeballing: the lettering box is 935.9 x 281.7, of which 241.7 sits above the
+ * baseline (cap height, the "A") and 40 below it (the descender of the "y").
+ *
+ *   height      0.82em  -- so cap height lands at 0.82 x 241.7/281.7 = 0.703em,
+ *                          which is the cap height of the surrounding face
+ *   width       height x 935.9/281.7
+ *   v-align    -0.1164em -- 0.82 x 40/281.7, dropping the box by exactly its
+ *                           own descender so the logo's baseline is the line's
+ *
+ * Getting this from metrics rather than by nudging matters because the headline
+ * is `clamp(25px, 3.2vw, 33px)`: em-relative values track it at every viewport
+ * width, where a pixel nudge would only be right at one. */
+.wordmark {
+  display: inline-block;
+  height: 0.82em;
+  width: calc(0.82em * 935.9 / 281.7);
+  vertical-align: -0.1164em;
+  background-color: currentColor;
+  mask: url(/astray-word.svg) no-repeat center / contain;
+  -webkit-mask: url(/astray-word.svg) no-repeat center / contain;
+}
+
+.diagnosis > p:not(.eyebrow) {
+  margin: 16px 0 0;
+  max-width: 62ch;
+  color: var(--foreground-2);
+  font-size: 15.5px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+/* The false rule itself, given a plaque of its own because it is the single
+ * finding the whole run produces. The accent is the leading rule rather than
+ * the text colour: coral has no lightness that clears the body-text floor
+ * against its own tint. */
+.rule {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 20px 0 0;
+  padding: 15px 18px;
+  overflow-x: auto;
+  background: var(--primary-soft);
+  border-inline-start: 2px solid var(--primary);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: clamp(15px, 2vw, 17.5px);
+  letter-spacing: -0.012em;
+}
+
+/* The solved steps, shown in place of a false rule when there was no attempt to
+   diagnose. Numbered because the order is the method: these are steps to follow,
+   not a list of facts. */
+.solution {
+  margin: 20px 0 0;
+  padding: 0;
+  padding-inline-start: 1.4em;
+  display: grid;
+  gap: 9px;
+}
+
+.solution li {
+  padding-inline-start: 4px;
+  color: var(--foreground-2);
+  font-size: clamp(13.5px, 1.6vw, 15px);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.solution li::marker { color: var(--muted-foreground); font-size: 12px; }
+
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  background: oklch(1 0 0 / 0.05);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-weight: 520;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Green means a machine checked it. The tick in the label is a second cue, so
+ * the claim does not rest on colour alone. */
+.badge.is-good {
+  background: var(--success-soft);
+  box-shadow: inset 0 0 0 1px var(--success-line);
+  color: var(--foreground-2);
+}
+
+.badge.is-peers {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+  color: var(--foreground-2);
+}
+
+.spinner {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .spinner { animation: spin 720ms linear infinite; }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------------ theatre */
+/* Holds the expanded two-column layout until the chat column can no longer
+ * carry a readable measure, then stacks. The breakpoint comes from that, not
+ * from a device width: the player needs ~560px to be watchable and the chat
+ * ~348px, which stop coexisting just above 1040px. */
+.theatre {
+  display: grid;
+  grid-template-columns: minmax(0, 1.68fr) minmax(348px, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+@media (max-width: 1040px) { .theatre { grid-template-columns: minmax(0, 1fr); } }
+
+.stage { display: grid; gap: 12px; min-width: 0; }
+
+/* One shell around the video and its filmstrip so they read as a single device
+ * rather than two stacked boxes. */
+.screen {
+  padding: 8px;
+  background: var(--card);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+
+/* Concentric: a 26px shell with 8px padding gives an 18px inner radius. */
+.player {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.player video { display: block; width: 100%; height: 100%; }
+
+.player.is-empty {
+  display: grid;
+  place-items: center;
+  padding: 26px;
+  background: oklch(0 0 0 / 0.34);
+}
+
+/* The wait is three to four minutes, so the pipeline shows the run's actual
+ * reasoning instead of a spinner: each stage reports what it decided. */
+.pipeline { width: min(100%, 430px); max-height: 100%; overflow-y: auto; }
+
+.pipeline .eyebrow { margin-bottom: 12px; }
+
+.stages { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+
+.stages li {
+  display: grid;
+  grid-template-columns: 15px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  transition-property: color, background-color;
+  transition-duration: 200ms;
+  transition-timing-function: ease-out;
+}
+
+.stages li.is-done { color: var(--foreground-2); }
+
+.stages li.is-active {
+  background: var(--primary-soft);
+  color: var(--foreground);
+  font-weight: 550;
+}
+
+.mark { text-align: center; line-height: 1.5; color: var(--muted-foreground); }
+.stages li.is-done .mark { color: var(--success); }
+.stages li.is-active .mark { color: var(--primary); }
+
+.why {
+  display: block;
+  margin-top: 3px;
+  max-width: 52ch;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+/* --------------------------------------------------------------------- rail */
+.rail-wrap { position: relative; min-width: 0; }
+
+.rail {
+  display: flex;
+  gap: 8px;
+  padding: 2px 2px 6px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+/* The trailing fade is the affordance for "there are more beats past the edge";
+ * without it the filmstrip looks complete at whatever width it happens to be.
+ *
+ * It is a mask on the strip rather than a gradient to --background painted over
+ * it, because the rail sits above the aurora: a fade to a flat colour would
+ * read as a smudge wherever the wash behind it is not that exact colour. And it
+ * is applied only when the strip actually overflows -- app.js measures that --
+ * since fading the last chip when there is nothing past it is a lie. */
+.rail-wrap.is-scrollable .rail {
+  mask-image: linear-gradient(to right, #000 calc(100% - 52px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 52px), transparent);
+  padding-inline-end: 52px;
+}
+
+.rail::-webkit-scrollbar { display: none; }
+
+.beat {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 3px;
+  min-width: 156px;
+  max-width: 212px;
+  padding: 9px 13px;
+  background: var(--card-solid);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted-foreground);
+  text-align: start;
+  scroll-snap-align: start;
+  transition-property: background-color, box-shadow, color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+/* The timestamp lifts a step on hover as well as the fill: --muted-foreground on
+ * --muted measures Lc 59.8, marginally under the floor for non-body text. */
+.beat:hover:not(:disabled) { background: var(--muted); }
+.beat:hover:not(:disabled) .beat-time { color: var(--foreground-2); }
+.beat:active:not(:disabled) { scale: 0.96; }
+.beat:disabled { opacity: 0.45; cursor: default; }
+
+.beat-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--foreground-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.35;
+  letter-spacing: -0.008em;
+}
+
+.beat-time { font-size: 11.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+
+/* The beat that targets the misconception is the point of the whole render.
+ * Marked with a ring rather than a fill so the active state can still fill it. */
+.beat.is-target { box-shadow: var(--ring-1), inset 0 0 0 1px var(--primary-line); }
+
+.beat.is-active {
+  background: var(--primary-soft-2);
+  box-shadow: 0 0 0 1px var(--primary-line), 0 6px 20px -8px var(--primary-glow);
+}
+
+/* Full ink, not the accent: coral on a coral tint measures Lc 57, under the
+ * floor, and the fill plus ring already say "active" without recolouring. */
+.beat.is-active .beat-title, .beat.is-active .beat-time { color: var(--foreground); }
+
+/* --------------------------------------------------------------------- chat */
+.chat {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  position: sticky;
+  top: 86px;
+  max-height: calc(100dvh - 130px);
+  min-height: 470px;
+}
+
+@media (max-width: 1040px) { .chat { position: static; max-height: none; } }
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-mark { display: block; flex: 0 0 auto; width: 18px; height: 18px; color: var(--foreground); }
+
+.messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.messages:empty { display: none; }
+
+.msg { display: grid; gap: 6px; }
+.msg.user { justify-items: end; }
+
+.who {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.msg .body { max-width: 94%; color: var(--foreground-2); font-size: 14.5px; line-height: 1.62; }
+
+.msg.user .body {
+  padding: 10px 14px;
+  background: var(--muted);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-xs) var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  color: var(--foreground);
+}
+
+.msg .body > *:first-child { margin-top: 0; }
+.msg .body > *:last-child { margin-bottom: 0; }
+.msg .body p { margin: 0 0 10px; }
+.msg .body ul { margin: 0 0 10px; padding-inline-start: 20px; display: grid; gap: 7px; }
+.msg .body strong { color: var(--foreground); font-weight: 620; }
+
+.msg .body code {
+  padding: 1.5px 5px;
+  background: oklch(0 0 0 / 0.34);
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* A citation is the product's whole claim, that the tutor knows what the
+ * student watched. Styled as a control because it is one: it seeks the player. */
+.cite {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 1px;
+  padding: 3px 10px 3px 8px;
+  background: var(--primary-soft);
+  border: 0;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 540;
+  font-variant-numeric: tabular-nums;
+  vertical-align: baseline;
+  transition-property: background-color, box-shadow, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.cite:hover:not(:disabled) {
+  background: var(--primary-soft-2);
+  box-shadow: inset 0 0 0 1px var(--primary), 0 4px 14px -6px var(--primary-glow);
+}
+
+.cite:active:not(:disabled) { scale: 0.96; }
+.cite:disabled { cursor: default; opacity: 0.6; }
+
+/* A triangle's optical centre sits right of its geometric one. */
+.cite .play { color: var(--primary); font-size: 9px; line-height: 1; transform: translateX(0.5px); }
+
+.chat-empty { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: flex-end; padding: 24px 20px; }
+
+.chat-empty-title { margin: 0 0 6px; color: var(--foreground); font-size: 14px; font-weight: 580; }
+
+.suggestions { display: grid; gap: 7px; margin-top: 16px; }
+
+.suggestion {
+  padding: 10px 13px;
+  background: oklch(1 0 0 / 0.035);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--foreground-2);
+  font-size: 13.5px;
+  text-align: start;
+  transition-property: background-color, box-shadow, color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.suggestion:hover:not(:disabled) {
+  background: oklch(1 0 0 / 0.06);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--foreground);
+}
+
+.suggestion:active:not(:disabled) { scale: 0.96; }
+.suggestion:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.composer { display: flex; gap: 9px; padding: 14px 20px 0; }
+
+#chat-hint { margin: 0; padding: 12px 20px 16px; color: var(--muted-foreground); font-size: 12px; }
+
+/* ----------------------------------------------------------------- insights */
+.stat-list { display: grid; gap: 3px; }
+
+.stat {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  align-items: baseline;
+  padding: 13px 14px;
+  border-radius: var(--radius);
+  transition-property: background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.stat:hover { background: oklch(1 0 0 / 0.035); }
+
+.stat-label { color: var(--foreground-2); font-size: 14px; line-height: 1.45; text-wrap: pretty; }
+
+.stat-count {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  min-width: 4px;
+  margin-top: 5px;
+  background: linear-gradient(90deg, var(--primary), oklch(0.780 0.129 29.2 / 0.42));
+  border-radius: var(--radius-full);
+}
+
+/* ------------------------------------------------------- your past problems */
+/* Rows are anchors, not buttons: each one is a real destination with a real
+ * URL, so middle-click and "open in new tab" work, and a spoken problem that
+ * scrolled off is still somewhere the student can get back to. */
+.past-list { display: grid; gap: 3px; }
+
+.past-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 13px 14px;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+  transition-property: background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.past-row:hover { background: oklch(1 0 0 / 0.035); }
+
+.past-main { display: grid; gap: 4px; min-width: 0; }
+
+/* The problem is the identity of the row, so it is set in the mono face the
+ * student typed it in and truncated rather than wrapped -- a wrapped equation
+ * loses the shape you recognise it by. */
+.past-problem {
+  overflow: hidden;
+  color: var(--foreground-2);
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.past-sub { color: var(--muted-foreground); font-size: 12.5px; line-height: 1.45; }
+
+.past-topic {
+  padding: 4px 10px;
+  background: oklch(1 0 0 / 0.05);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.past-when {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (width <= 620px) {
+  /* The topic chip is the first thing to go: it is a nicety beside the problem
+     itself and the date, and three columns at this width truncates the problem
+     to nothing. */
+  .past-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .past-topic { display: none; }
+}
+
+/* ---------------------------------------------- the problem, on its session */
+/* Load-bearing for voice. A problem that was spoken was never typed anywhere the
+ * student can check, so this is the only place they can see what was heard. */
+.problem-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  margin: 0 0 14px;
+  padding-inline: 2px;
+}
+
+.problem-label { color: var(--muted-foreground); font-size: 12.5px; }
+.problem-line .mono { color: var(--foreground-2); font-size: 14px; }
+
+.empty { padding: 6px 0 4px; }
+.empty-title { margin: 0 0 6px; color: var(--foreground); font-size: 14.5px; font-weight: 570; }
+.empty .field-hint { max-width: 52ch; margin-bottom: 0; }
+.empty .btn { margin-top: 16px; }
+
+/* ------------------------------------------------------------------- motion */
+/* Staged view entrance: opacity, a short lift and a blur, chunked by semantic
+ * group and offset ~90ms so the order communicates hierarchy. It runs once per
+ * view mount, never on hover and never on a repeated interaction. */
+/* Short on purpose. The blur makes text unreadable while it runs, so the total
+ * for the last group (delay plus duration) stays inside ~0.5s. */
+.enter { animation: enter 360ms var(--ease-out) both; }
+.enter-1 { animation-delay: 0ms; }
+.enter-2 { animation-delay: 70ms; }
+.enter-3 { animation-delay: 140ms; }
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(12px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+
+/* ---------------------------------------------------------------- utilities */
+.hidden { display: none !important; }
+
+/* The `hidden` attribute is only a UA-stylesheet `display: none`, so any author
+ * rule setting `display` outranks it. `.btn` sets `display: inline-flex`, which
+ * meant `<button hidden>` still rendered -- the microphone would have been
+ * visible and inert on Safari and Firefox, the two browsers whose lack of
+ * SpeechRecognition is the entire reason it starts hidden. */
+[hidden] { display: none !important; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 12px;
+  z-index: 50;
+  padding: 10px 16px;
+  background: var(--popover);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  color: var(--foreground);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 160ms ease-out;
+}
+
+.skip:focus-visible { transform: translateY(0); }
+
+/* Everything animated above is decorative or has a static equivalent, so all of
+ * it can stop without losing information. The aurora and the beam are parked on
+ * a fixed frame rather than removed, so the design still reads as designed. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .btn:active, .beat:active, .cite:active, .suggestion:active { scale: 1; }
+  .btn-primary::after { display: none; }
+  .card-lit::before { display: none; }
+
+  .card-beam::after {
+    background: conic-gradient(
+      from 214deg,
+      transparent 0deg 62deg,
+      var(--primary-line) 84deg,
+      var(--primary) 92deg,
+      var(--primary-line) 100deg,
+      transparent 122deg 360deg
+    );
+  }
+}

@@ -1,0 +1,50 @@
+{
+ "session_id": "5901c1da-fe6b-4e55-a4f6-31bd5834cb38",
+ "status": "ready",
+ "problem": "Solve x^{2} = 16",
+ "submission": {
+  "problem": "Solve x^{2} = 16",
+  "steps": [
+   "x = 4"
+  ],
+  "prose": null,
+  "source": "typed",
+  "transcription_confidence": null,
+  "student_corrected": true,
+  "unreadable": []
+ },
+ "explaining": false,
+ "diagnosis": {
+  "correct_solution": [
+   "Take the square root of both sides: \u221a(x\u00b2) = \u221a16",
+   "Simplify to |x| = 4",
+   "So x = 4 or x = -4"
+  ],
+  "sympy_check": {
+   "kind": "solution_set",
+   "lhs": null,
+   "rhs": null,
+   "equation": "x**2 - 16",
+   "variable": "x",
+   "candidates": [
+    "4",
+    "-4"
+   ],
+   "skip_reason": null
+  },
+  "verified_by_sympy": true,
+  "no_error_found": false,
+  "divergence_index": 0,
+  "buggy_rule": "x^2 = a, with a>0 => x = sqrt(a)",
+  "misconception_statement": "You gave the positive solution, but when solving x\u00b2 = 16, both 4 and -4 work because (-4)\u00b2 also equals 16.",
+  "evidence": [
+   "The student's sole step is x = 4, missing the negative solution -4."
+  ],
+  "confidence": 0.95,
+  "competing_hypotheses": [],
+  "is_unclear": false,
+  "clarifying_question": null,
+  "topic": "algebra.quadratic_equations",
+  "misconception_id": 10
+ }
+}

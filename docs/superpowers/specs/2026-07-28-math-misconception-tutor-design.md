@@ -8,9 +8,8 @@
 A student submits a math problem plus their own attempted solution. The system:
 
 1. Diagnoses the **specific buggy rule** behind their error, not just right/wrong.
-2. Runs a multi-stage planning pipeline (adapted from
-   [Math-To-Manim](https://github.com/HarleyCoops/Math-To-Manim)) that turns the diagnosis into a
-   Manim animation targeting *their* gap.
+2. Runs a multi-stage planning pipeline that turns the diagnosis into a Manim animation
+   targeting *their* gap.
 3. Opens a chat tutor whose answers cite **specific moments in that animation**, clickable to seek
    the video.
 4. Closes with a generated checkpoint that tests whether the misconception is actually gone.
@@ -60,7 +59,7 @@ A `strict=True` mode using `thinking: disabled` + forced `tool_choice` is availa
 schema adherence matters more than reasoning (taxonomy slugging, checkpoint grading).
 
 **Bonus:** `reasoning_content` is a genuine per-stage chain of thought. Persist it — it powers the
-live "watch the tutor think" progress view and mirrors Math-To-Manim's inspectable run artifacts.
+live "watch the tutor think" progress view and keeps every run artifact inspectable.
 
 Pricing (per 1M tokens):
 
@@ -166,9 +165,9 @@ tests/
 docs/superpowers/specs/
 ```
 
-## 4. Pipeline — the adapted charter chain
+## 4. Pipeline — the charter chain
 
-Math-To-Manim's six-stage chain, with ingest and diagnosis prepended. Diagnosis is what makes every
+A six-stage planning chain, with ingest and diagnosis prepended. Diagnosis is what makes every
 downstream stage student-specific instead of a generic topic explainer.
 
 | # | Stage | In | Out | Model |

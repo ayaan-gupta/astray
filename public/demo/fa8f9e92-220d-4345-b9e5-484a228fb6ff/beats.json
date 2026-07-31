@@ -1,0 +1,38 @@
+{
+ "beats": [
+  {
+   "id": "b1",
+   "title": "Correct expansion",
+   "purpose": "Show the correct algebraic expansion of (a+b)^2 to set a baseline",
+   "targets_misconception": false,
+   "start_s": 0.0,
+   "end_s": 8.0
+  },
+  {
+   "id": "b2",
+   "title": "Area model",
+   "purpose": "Visualize the missing middle term as two rectangles in a square",
+   "targets_misconception": false,
+   "start_s": 8.4,
+   "end_s": 17.467
+  },
+  {
+   "id": "b3",
+   "title": "3D surfaces",
+   "purpose": "Show that the two expressions produce different 3D surfaces except along axes",
+   "targets_misconception": false,
+   "start_s": 17.867,
+   "end_s": 29.667
+  },
+  {
+   "id": "b4",
+   "title": "Concrete gap",
+   "purpose": "Mark the specific point (a=1, b=3) from the example to show the numeric difference",
+   "targets_misconception": true,
+   "start_s": 30.067,
+   "end_s": 37.988
+  }
+ ],
+ "video_url": "demo/fa8f9e92-220d-4345-b9e5-484a228fb6ff/video.mp4",
+ "render_mode": "generated"
+}

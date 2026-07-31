@@ -1,0 +1,46 @@
+{
+ "beats": [
+  {
+   "id": "b1",
+   "title": "The Buggy Rule",
+   "purpose": "State the problem and the student's incorrect rule.",
+   "targets_misconception": false,
+   "start_s": 0.0,
+   "end_s": 6.6
+  },
+  {
+   "id": "b2",
+   "title": "Correct Derivation",
+   "purpose": "Present the correct chain rule derivation step by step.",
+   "targets_misconception": false,
+   "start_s": 7.0,
+   "end_s": 15.47
+  },
+  {
+   "id": "b3",
+   "title": "Visualizing the Composition",
+   "purpose": "Make the chain visible as a 3D lift structure.",
+   "targets_misconception": false,
+   "start_s": 15.87,
+   "end_s": 27.337
+  },
+  {
+   "id": "b4",
+   "title": "The Missing Factor",
+   "purpose": "Demonstrate that ignoring du/dx leads to wrong value at x=0.",
+   "targets_misconception": true,
+   "start_s": 27.737,
+   "end_s": 36.285
+  },
+  {
+   "id": "b5",
+   "title": "Correct Rule",
+   "purpose": "Restate the correct chain rule formula.",
+   "targets_misconception": false,
+   "start_s": 36.685,
+   "end_s": 44.893
+  }
+ ],
+ "video_url": "demo/bb6a4531-dbde-4d4e-953c-6237dd1e3245/video.mp4",
+ "render_mode": "generated"
+}

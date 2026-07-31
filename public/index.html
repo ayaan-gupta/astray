@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astray — find where your reasoning went astray</title>
+<meta name="description" content="Astray diagnoses the false rule behind a maths mistake, animates that exact moment, and answers questions by pointing at the animation.">
+<meta name="theme-color" content="#0b0d12">
+<link rel="icon" href="/astray-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<!-- Deferred scripts run in order: the wake matcher before the state machine that
+     calls it, and both before the session view that looks for `createDictation`. -->
+<script defer src="/wake.js"></script>
+<script defer src="/voice.js"></script>
+<script>window.ASTRAY_DEMO=true;</script>
+<script defer src="/app.js"></script>
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+
+<!-- Decorative only: an aurora wash and a masked grid. Hidden from assistive
+     tech and never interactive. -->
+<div class="backdrop" aria-hidden="true">
+  <div class="aurora"><span></span><span></span><span></span></div>
+</div>
+
+<!-- The mark at small sizes, defined once and referenced with <use>.
+     `astray-mark.svg` is the full artwork: a coral core inside eight strokes,
+     four diagonal arms and four arcs closing the ring. It is drawn on a 248px
+     canvas and it needs that room. At the 13-17px this page asks for, an arc is
+     a third of a pixel of near-white on a dark ground, and the whole mark
+     collapses into a grey smudge -- it was loading and painting perfectly, and
+     still read as a missing image.
+     So this is the small-size cut: the four arms and the core, which is what
+     survives the reduction and still reads as the mark. Inline rather than an
+     <img> so the arms can take `currentColor` and tint to whatever line of type
+     they sit in; the core keeps the brand coral, which is the one hue worth
+     spending a pixel on at this size. -->
+<svg class="sprite" aria-hidden="true" width="0" height="0">
+  <symbol id="astray-mark" viewBox="0 0 248 248">
+    <path fill="currentColor" d="M54.5536 169.631C56.4464 167.738 59.5991 168.074 61.2036 170.217C65.8981 176.485 71.5155 182.022 77.8541 186.627C80.0415 188.216 80.4056 191.407 78.4938 193.319L28.7454 243.068C22.1695 249.644 11.5078 249.644 4.93191 243.068C-1.64398 236.492 -1.64389 225.831 4.93191 219.255L54.5536 169.631Z"/>
+    <path fill="currentColor" d="M186.291 169.762C187.888 167.597 191.06 167.247 192.962 169.149L243.068 219.255C249.644 225.831 249.644 236.492 243.068 243.068C236.492 249.644 225.83 249.644 219.255 243.068L169.149 192.962C167.247 191.06 167.597 187.888 169.762 186.292C176.065 181.642 181.642 176.065 186.291 169.762Z"/>
+    <path fill="currentColor" d="M219.255 4.93195C225.83 -1.64398 236.492 -1.64398 243.068 4.93195C249.644 11.5079 249.644 22.1695 243.068 28.7455L193.319 78.4938C191.407 80.4056 188.216 80.0407 186.627 77.8533C182.022 71.515 176.485 65.898 170.217 61.2037C168.074 59.5992 167.738 56.4464 169.631 54.5537L219.255 4.93195Z"/>
+    <path fill="currentColor" d="M4.93191 4.93195C11.5078 -1.64399 22.1695 -1.64396 28.7454 4.93195L78.0087 54.1952C79.9106 56.0975 79.5602 59.2689 77.3953 60.8658C71.0922 65.5153 65.5152 71.0923 60.8657 77.3954C59.2688 79.5602 56.0975 79.9107 54.1952 78.0087L4.93191 28.7455C-1.64398 22.1696 -1.64396 11.5079 4.93191 4.93195Z"/>
+    <circle cx="123.579" cy="123.579" r="52.62" fill="#FF9687"/>
+  </symbol>
+</svg>
+
+<header class="topbar">
+  <a class="brand" href="#/"><img src="/astray-wordmark.svg" alt="Astray home" width="86" height="26"></a>
+  <nav class="nav" aria-label="Sections">
+    <a href="#/" data-nav="submit">Submit</a>
+    <a href="#/insights" data-nav="insights">Insights</a>
+  </nav>
+</header>
+
+<main id="view" tabindex="-1"></main>
+
+<!-- ---------------------------------------------------------------- SUBMIT -->
+<template id="tpl-submit">
+  <section class="pane pane-narrow">
+    <div class="hero enter enter-1">
+      <p class="eyebrow">
+        <svg class="eyebrow-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
+        Misconception tutor
+      </p>
+      <h1 class="display">Find where your reasoning went astray.</h1>
+      <p class="lede">Give Astray the problem and your own attempt, mistakes included. It finds the
+        exact step your reasoning left the correct path, names the false rule behind it, and
+        animates that moment.</p>
+    </div>
+
+    <div class="card card-lit enter enter-2">
+      <div class="tabs" role="tablist" aria-label="How to send your work">
+        <button class="tab is-active" role="tab" id="tab-typed" aria-selected="true"
+                aria-controls="form-typed" data-tab="typed" type="button">Type it</button>
+        <button class="tab" role="tab" id="tab-photo" aria-selected="false" tabindex="-1"
+                aria-controls="form-photo" data-tab="photo" type="button">Photograph it</button>
+      </div>
+
+      <form id="form-typed" class="tabpanel" role="tabpanel" aria-labelledby="tab-typed">
+        <div class="field">
+          <label class="field-label" for="typed-problem">Problem</label>
+          <input id="typed-problem" name="problem" class="mono" required
+                 placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="typed-work">Your working</label>
+          <p class="field-hint" id="typed-work-hint">One step per line, exactly as you wrote it.</p>
+          <textarea id="typed-work" name="work" class="mono" rows="6"
+                    aria-describedby="typed-work-hint" placeholder="(x+5)^2&#10;= x^2 + 25"></textarea>
+        </div>
+        <button class="btn btn-primary btn-icon-end" type="submit">
+          Diagnose my work
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h13M12 5l7 7-7 7"></path>
+          </svg>
+        </button>
+      </form>
+
+      <form id="form-photo" class="tabpanel hidden" role="tabpanel" aria-labelledby="tab-photo">
+        <div class="field">
+          <label class="field-label" for="photo-problem">Problem</label>
+          <input id="photo-problem" name="problem" class="mono" required
+                 placeholder="Expand and simplify (x + 5)^2" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label" for="photo-file">Your working</label>
+          <input type="file" id="photo-file" name="file" accept="image/*" class="sr-only">
+          <label class="drop" id="drop" for="photo-file">
+            <span class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2.5"></rect>
+                <path d="M3 15.5l4.5-4a2 2 0 0 1 2.7 0L16 17"></path>
+                <circle cx="15.5" cy="9" r="1.6"></circle>
+              </svg>
+            </span>
+            <span class="drop-text" id="drop-text">Drop a photo of your handwritten work,
+              or choose a file</span>
+            <span class="drop-sub">JPG, PNG or HEIC</span>
+          </label>
+        </div>
+
+        <div id="review" class="review hidden">
+          <h2 class="card-title">Check the transcription</h2>
+          <p class="field-hint">Astray read your photo as the lines below. Fix anything it got
+            wrong: this is what gets diagnosed, so it has to be what you actually wrote.</p>
+          <div id="review-lines" class="review-lines"></div>
+          <button class="btn btn-primary" id="confirm-btn" type="button">Diagnose this work</button>
+        </div>
+      </form>
+
+      <p class="err" id="submit-err" role="alert"></p>
+    </div>
+
+    <!-- Every problem this browser has sent, newest first. Hidden until there is
+         one, so a first-time visitor is not shown an empty shelf. -->
+    <section class="card card-lit enter enter-3" id="past" aria-labelledby="h-past" hidden>
+      <div class="card-head">
+        <h2 class="card-title" id="h-past">Your problems</h2>
+        <p class="field-hint">Everything you have brought here. Pick one to watch it again or
+          keep asking about it.</p>
+      </div>
+      <div id="past-list" class="past-list"></div>
+    </section>
+  </section>
+</template>
+
+<!-- --------------------------------------------------------------- SESSION -->
+<template id="tpl-session">
+  <section class="pane">
+    <!-- What problem this session is about. It matters most when nobody typed it:
+         a problem created from speech was heard rather than written, so the
+         student has to be able to see what was heard. -->
+    <p class="problem-line" id="problem-line" hidden>
+      <span class="problem-label">Problem</span>
+      <span class="mono" id="problem-text"></span>
+    </p>
+    <div id="diagnosis" class="card card-beam diagnosis is-pending enter enter-1">
+      <span class="spinner" aria-hidden="true"></span>
+      <p>Reading your working…</p>
+    </div>
+
+    <div class="theatre enter enter-2">
+      <div class="stage">
+        <div class="screen">
+          <div id="player-wrap" class="player is-empty">
+            <div class="pipeline" id="pipeline" role="status">
+              <p class="eyebrow">
+                <svg class="eyebrow-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
+                Building your animation
+              </p>
+              <ol id="stage-list" class="stages"></ol>
+            </div>
+          </div>
+        </div>
+        <div class="rail-wrap">
+          <div id="rail" class="rail" role="group" aria-label="Moments in the animation"></div>
+        </div>
+      </div>
+
+      <aside class="card chat" aria-labelledby="chat-title">
+        <div class="chat-head">
+          <svg class="chat-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
+          <h2 class="card-title" id="chat-title">Ask about it</h2>
+          <!-- The mute control, and the one place the state is spelled out in
+               words rather than colour. An always-on microphone whose state can
+               only be read off an icon is the thing that makes people distrust
+               it, so this says "listening" or "off" in text, always. -->
+          <button class="wake" id="wake-toggle" type="button" hidden aria-pressed="false">
+            <span class="wake-dot" aria-hidden="true"></span>
+            <span class="wake-label" id="wake-label">Hey Astray</span>
+          </button>
+        </div>
+        <div id="messages" class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+        <div id="chat-empty" class="chat-empty">
+          <p class="chat-empty-title">Answers point at the animation</p>
+          <p class="field-hint">Every reply cites the moment it is talking about, so you can jump
+            straight there.</p>
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+        <form id="chat-form" class="composer">
+          <label class="sr-only" for="chat-input">Ask a question about your mistake</label>
+          <input id="chat-input" placeholder="Why doesn't that work?" autocomplete="off" disabled>
+          <button class="btn btn-mic" id="mic-btn" type="button" disabled hidden
+                  aria-label="Ask by voice">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3.5a3 3 0 0 1 3 3V11a3 3 0 0 1-6 0V6.5a3 3 0 0 1 3-3Z"></path>
+              <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"></path>
+              <!-- Shown only when muted, so "off" is a different shape and not
+                   just a different colour. -->
+              <path class="mic-slash" d="M4 3.5l16 17"></path>
+            </svg>
+          </button>
+          <button class="btn btn-primary btn-send" type="submit" disabled aria-label="Send question">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h13M12 5l7 7-7 7"></path>
+            </svg>
+          </button>
+        </form>
+        <p class="field-hint" id="chat-hint">Chat opens as soon as the diagnosis lands. You don't
+          have to wait for the animation.</p>
+      </aside>
+    </div>
+  </section>
+</template>
+
+<!-- -------------------------------------------------------------- INSIGHTS -->
+<template id="tpl-insights">
+  <section class="pane pane-narrow">
+    <div class="hero enter enter-1">
+      <p class="eyebrow">
+        <svg class="eyebrow-mark" aria-hidden="true"><use href="#astray-mark"/></svg>
+        Insights
+      </p>
+      <h1 class="display">What people get wrong.</h1>
+      <p class="lede">Every diagnosis is canonicalised onto a shared misconception, so the same
+        error made with different letters counts once. Nothing here identifies anyone.</p>
+    </div>
+
+    <section class="card card-lit enter enter-2" aria-labelledby="h-history">
+      <div class="card-head">
+        <h2 class="card-title" id="h-history">Your patterns</h2>
+        <p class="field-hint">Misconceptions this browser has been diagnosed with.</p>
+      </div>
+      <div id="history"></div>
+    </section>
+
+    <section class="card card-lit enter enter-3" aria-labelledby="h-frequency">
+      <div class="card-head">
+        <h2 class="card-title" id="h-frequency">Across everyone</h2>
+        <p class="field-hint">Counted once per student, never per attempt.</p>
+      </div>
+      <div id="frequency"></div>
+    </section>
+  </section>
+</template>
+</body>
+</html>

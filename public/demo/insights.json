@@ -1,0 +1,54 @@
+{
+ "misconceptions": [
+  {
+   "id": 1,
+   "slug": "freshmans-dream",
+   "canonical_statement": "Distributes an exponent across a sum, dropping the cross term.",
+   "topic": "algebra.binomial_expansion",
+   "occurrences": 4,
+   "students": 3
+  },
+  {
+   "id": 19,
+   "slug": "chain-rule-omitted",
+   "canonical_statement": "Differentiates the outer function without the inner derivative.",
+   "topic": "calculus.derivatives",
+   "occurrences": 2,
+   "students": 1
+  },
+  {
+   "id": 10,
+   "slug": "square-root-single-sign",
+   "canonical_statement": "Keeps only the positive root when solving by square roots.",
+   "topic": "algebra.quadratics",
+   "occurrences": 1,
+   "students": 1
+  }
+ ],
+ "history": [
+  {
+   "id": 19,
+   "slug": "chain-rule-omitted",
+   "canonical_statement": "Differentiates the outer function without the inner derivative.",
+   "topic": "calculus.derivatives",
+   "times": 2,
+   "last_seen": "2026-07-30 19:43:31"
+  },
+  {
+   "id": 1,
+   "slug": "freshmans-dream",
+   "canonical_statement": "Distributes an exponent across a sum, dropping the cross term.",
+   "topic": "algebra.binomial_expansion",
+   "times": 2,
+   "last_seen": "2026-07-30 19:38:45"
+  },
+  {
+   "id": 10,
+   "slug": "square-root-single-sign",
+   "canonical_statement": "Keeps only the positive root when solving by square roots.",
+   "topic": "algebra.quadratics",
+   "times": 1,
+   "last_seen": "2026-07-30 05:03:52"
+  }
+ ]
+}

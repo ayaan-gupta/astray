@@ -2,24 +2,47 @@
 
 # Astray
 
-**Finds where your math reasoning went astray — then shows you.**
+### Find where your reasoning went astray — then see it.
 
-Most tools tell a student the answer is wrong. Astray finds the exact step where
-the reasoning left the correct path, names the false rule behind it, and builds
-an animation of *that* misconception.
+Every math tool tells you the answer is wrong. **Astray tells you what you believe.**
+It finds the exact step your reasoning left the correct path, names the false rule
+you were actually applying, and builds an animation of *that misconception*.
 
-<br>
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/ayaan-gupta/astray)
+
+</div>
+
+---
+
+## The problem
+
+A student writes `(y+3)² = y² + 9` and gets a red cross. They now know this
+answer was wrong. They do **not** know that they hold a rule — *distribute the
+exponent across a sum* — that will break `log(x+y)`, `√(a²+b²)` and `1/(a+b)` in
+exactly the same way for the rest of the year.
+
+Worked solutions don't fix this. A student who believes that rule reads the
+correct expansion, agrees with every line, and keeps the belief. The two sides
+are competing strings, and nothing forces a choice between them.
+
+So Astray doesn't show the correct answer. It shows the student's own rule
+**failing**, in a picture built for their specific error.
+
+## What it does
+
+<div align="center">
 
 <img src="docs/assets/surfaces.gif" width="720" alt="Two surfaces over the same square of inputs: (a+b)² above a²+b², touching along both axes and separating everywhere else, with the camera orbiting.">
 
-**`(a+b)² → a² + b²`** · the two rules as two surfaces, orbiting
+**`(a+b)² → a² + b²`** · both rules as surfaces, orbiting
 
 </div>
 
 The sheets **touch along the two axes** and separate everywhere else. That says
-something a derivation cannot: the rule is exactly right whenever one term is
-zero — which is why it feels right, because every case the student ever checked
-was probably one of those — and the gap elsewhere is a solid object with a size.
+something a derivation cannot: the rule is exactly right whenever a term is zero
+— which is *why it feels right*, because nearly every case the student checked
+was one of those — and the gap elsewhere is a solid object with a size. A second
+beat then measures that gap at their own numbers: `16` against `10`, missing `6`.
 
 <div align="center">
 
@@ -29,10 +52,11 @@ was probably one of those — and the gap elsewhere is a solid object with a siz
 
 </div>
 
-`sin(x²)` becomes one curve in space whose three shadows are its three stages:
-`u = x²` on the floor, `sin(u)` up the wall, the answer on the back. Step evenly
-along `x` and the steps in `u` come out unequal — and that spacing ratio **is**
-the `2x` a dropped chain-rule factor leaves out. Seen, not asserted.
+A dropped chain-rule factor goes missing because the middle quantity is invisible
+in flat algebra. So give it an axis: `sin(x²)` becomes one curve in space whose
+three shadows are its three stages — `u = x²` on the floor, `sin(u)` up the wall,
+the answer on the back. Step evenly along `x`, and the steps in `u` come out
+unequal. That spacing ratio **is** the `2x` the student left out.
 
 <div align="center">
 
@@ -43,76 +67,47 @@ the `2x` a dropped chain-rule factor leaves out. Seen, not asserted.
 </div>
 
 Not every error deserves a camera. This one is an *absence* — every line the
-student wrote is true, and the mistake is a missing one. There is nothing to
-cross out, so a second dot arriving where they had nothing is the whole argument.
-A surface here would be spectacle with no content.
+student wrote is true, and the mistake is a missing one. There's nothing to cross
+out, so a second dot arriving where they had nothing is the whole argument. A
+surface here would be spectacle with no content.
+
+**Then the animation becomes addressable.** A tutor chat answers follow-up
+questions and cites the moment it's talking about — a chip you click to seek the
+player to that beat's measured start. Ask "show me the part with actual numbers"
+and it lands on the frame with the gap pillar.
 
 Every frame above came out of the real pipeline, from a student's wrong answer.
-Nothing is hand-drawn; `scripts/make_readme_gifs.sh` cuts them straight out of
-rendered sessions.
+Nothing is hand-drawn.
 
 ## How it works
 
-A student submits a problem and their own attempt — typed, or photographed and
-transcribed by a vision model. Then:
+Nine stages, each a typed artifact persisted with its own token count and cost.
+The first two are what make the rest student-specific: every later stage is told
+what *this* student believes, not what the topic is.
 
-1. Astray solves the problem correctly, **independently** of the student's work.
-2. It finds the **divergence index** — the first step where the two part.
-3. It names the **false rule** as a rewrite (`(a+b)^2 -> a^2 + b^2`), not a vague
-   topic label.
-4. It emits a SymPy check that would **falsify its own diagnosis**, runs it in a
-   sandbox, and overwrites its confidence with the measured result. The model
-   does not get to certify itself.
-5. It canonicalizes the rule against a growing taxonomy, so the same error made
-   with different letters lands on the same entry — which is what makes
-   `2 other students made this error` true rather than decorative.
-
-When the work is already correct, Astray says so and stops. Inventing an error
-the student did not make is treated as exactly as bad as missing a real one.
-
-Then the animation is planned, written, validated, rendered and narrated — and
-the tutor chat cites moments in it by timestamp, landing on a frame that exists.
-
-## The pipeline is Math-To-Manim's, with a diagnosis in front
-
-The reasoning chain is
-[Math-To-Manim](https://github.com/HarleyCoops/Math-To-Manim)'s reverse knowledge
-tree, stage for stage. Upstream expands a short question into a teaching plan and
-then into a scene; Astray does the same, having first worked out what this
-particular student got wrong.
-
-| Math-To-Manim | Astray | Artifact |
+| Stage | Does | Artifact |
 |---|---|---|
-| — | `s0_ingest`, `s1_diagnose` | the falsifiable diagnosis |
-| `IntentAgent` | `s2_intent` | `IntentAnalysis` |
-| `PrerequisiteGraphAgent` | `s3_prereq` | `PrerequisiteGraph` |
-| `CurriculumAgent` | `s4_curriculum` | `CurriculumPlan` |
-| `MathAgent` | `s5_math` | `MathContent` |
-| `StoryboardAgent` | `s6_visual` | `Storyboard` |
-| `SceneSpecAgent` + `ManimCodeAgent` | `s7_scene` | `SceneCode` |
-| `StaticReviewAgent` | `s8_validate` | `ValidationReport` |
-| `RenderAgent` | `server/render/runner.py` | `RenderResult` |
-| `ManimCodeAgent.repair()` | `server/render/repair.py` | a bounded repair loop |
+| `s0_ingest` | Normalize typed work, or transcribe a photo | `Submission` |
+| `s1_diagnose` | Solve independently, find the divergence, name the false rule | `Diagnosis` |
+| `s2_intent` | What must change in this student's head | `IntentAnalysis` |
+| `s3_prereq` | What they must already know for the argument to land | `PrerequisiteGraph` |
+| `s4_curriculum` | Order it into a teaching path | `CurriculumPlan` |
+| `s5_math` | The exact expressions the animation will show | `MathContent` |
+| `s6_visual` | Beats, each choosing a visual primitive | `Storyboard` |
+| `s7_scene` | Manim code for the whole scene | `SceneCode` |
+| `s8_validate` | Static gate before any container starts | `ValidationReport` |
 
-Every stage is a typed Pydantic artifact persisted with its own token count and
-cost — upstream's "keep LLM output reviewable by emitting intermediate artifacts
-before code", made durable rather than written to a run directory.
+Then a sandboxed render, a bounded repair loop, and narration written **after**
+the render — because only then are the beat durations *measured*, and a script
+written from the storyboard would be guessing at how long each beat lasts.
 
-Three things are ours:
-
-- The chain starts from a **diagnosis** rather than a question, so every later
-  stage is told what this student believes, not what the topic is.
-- Scene code runs in a **sandboxed container behind an AST allow-list**, because
-  the chain begins with untrusted student text.
-- The storyboard's beats are a **grounding contract the validator enforces**, so
-  a chat citation seeks to a moment that actually exists.
-
-## What makes it hold up
+### Four things that make it hold up
 
 **The diagnosis is falsifiable.** Every diagnosis ships a SymPy expression whose
-truth value would disprove it, run deterministically in a killable subprocess. A
-check that cannot fail is rejected as vacuous — a tautology would launder an
-unchecked claim into a certified one.
+truth value would disprove it, run deterministically in a killable subprocess.
+That result — not the model's claim — is what gets stored. A check that cannot
+fail is rejected as vacuous, because a tautology would launder an unchecked claim
+into a certified one. **The model does not get to certify itself.**
 
 **Generated code is untrusted, twice.** An AST allow-list *and* a
 `--network=none`, read-only, non-root container with memory, CPU and PID caps.
@@ -126,47 +121,39 @@ their working without it becoming one.
 **The grounding is enforced, not hoped for.** `s6` plans beats, `s7` must wrap
 each in `with beat(self, "bN")`, `s8` fails the render if any is missing or
 computed at runtime, and the container measures every beat's real start and end
-from the renderer clock.
-
-**Narration is written after the render, never before.** Only then are the beat
-durations *measured*, and each becomes a word budget the line has to fit. A
-script written from the storyboard would be guessing, and narration that guesses
-talks over the next visual.
+from the renderer clock. That's why a citation lands on a frame that exists.
 
 The failures behind each of these — and the ones that cost a render before they
-were fixed — are in **[docs/DESIGN.md](docs/DESIGN.md)**.
+were caught — are in **[docs/DESIGN.md](docs/DESIGN.md)**.
 
-## Running it
+## Stack
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+Python 3.12 · FastAPI · Pydantic v2 · SQLite · Manim CE in Docker · SymPy ·
+DeepSeek (reasoning + fast) · Gemini (vision) · Fish Audio (TTS) ·
+vanilla JS, no build step
+
+## Try it
+
+**Deployed demo** — the three sessions above, with their animations, measured
+timings and tutor transcripts, served as static files. Beat seeking and citation
+chips all work; diagnosing new work needs the full stack.
+
+```bash
+uv run python scripts/export_demo.py   # writes public/
+vercel deploy --prod                   # or use the button above
+```
+
+**The whole thing**, locally:
 
 ```bash
 uv sync
-cp server/.env.example server/.env   # then add your DeepSeek key
+cp server/.env.example server/.env     # add your DeepSeek key
 uv run uvicorn server.app:create_app --factory --port 8000
 ```
 
-`FAKE_LLM=1` runs the whole chain against canned responses — no network, no cost.
-`RENDER_ENABLED=0` plans animations without running containers; beats still exist,
-so chat stays grounded by title. Rendering itself needs Docker and
-`manimcommunity/manim:stable`.
-
-### API
-
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/sessions` | Create a session from typed problem + work |
-| `POST` | `/api/sessions/{id}/photo` | Transcribe handwritten work |
-| `PUT` | `/api/sessions/{id}/submission` | Confirm the transcription before diagnosis |
-| `GET` | `/api/sessions/{id}/stream` | SSE: diagnosis, then s2–s8 and the render |
-| `GET` | `/api/sessions/{id}/beats` | Beat rail: plan plus measured timings |
-| `GET` | `/media/{id}/video.mp4` | The rendered animation (range requests) |
-| `POST` | `/api/sessions/{id}/chat` | Grounded reply citing `[beat:bN]` |
-| `GET` | `/api/insights` | Misconception frequency and personal history |
-
-`/stream` claims a session with a compare-and-swap, so concurrent connections
-cannot double-bill a run; reconnecting to a finished session replays the stored
-result rather than re-running it.
+`FAKE_LLM=1` runs the entire chain against canned responses — no network, no
+cost. `RENDER_ENABLED=0` plans animations without containers. Rendering itself
+needs Docker and `manimcommunity/manim:stable`.
 
 ## Development
 
@@ -176,7 +163,7 @@ uv run ruff check . && uv run ruff format --check .
 ```
 
 The interesting failures here are *visual*, and the primitives import `manim`,
-which exists only inside the render image — so three scripts cover what a test
+which only exists inside the render image — so three scripts cover what a test
 cannot reach:
 
 ```bash
@@ -194,30 +181,6 @@ a frame before it was handled.
 uv run python -m evals.diagnosis.run   # 20 labelled cases against the real model
 ```
 
-Rule match is **not** currently a trustworthy gate — the scorer rejects
-substantively correct diagnoses on notation, and that number is left honest
-rather than tuned. Topic match and verification rate are reliable.
-
-## Honest limits
-
-- The wake phrase is Web Speech API inside the page. Close the tab and it stops;
-  background the tab and Chrome's timer throttling stretches the restart gaps.
-  The state machine is tested against a stubbed recognizer — **the acoustic path
-  has never been verified against a real microphone.**
-- Wake detection is edit distance on a general transcript, not a trained keyword
-  model, so it misses and misfires more than a real assistant would.
-- Idle listening streams audio to Google's servers. That is why muting is a
-  first-class control rather than a buried preference.
-- Session history is keyed by a random handle in `localStorage`. No accounts —
-  which means the history follows the browser profile, not the person.
-
-## Layout
-
-```
-server/charter/     s2–s8 stage prompts and typed contracts
-server/render/      primitives, AST validator, container runner, repair loop
-server/audio/       narration: budgeting, spoken-maths, phonemes, muxing
-web/                vanilla JS client — no build step
-docs/DESIGN.md      why it is the way it is
-DEMO.md             the prepared sessions, and what is live in them
-```
+Rule match is **not** a trustworthy gate — the scorer rejects substantively
+correct diagnoses on notation. That number is left honest rather than tuned.
+Topic match and verification rate are reliable.

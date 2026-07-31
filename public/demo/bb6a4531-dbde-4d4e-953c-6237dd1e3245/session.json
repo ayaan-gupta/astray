@@ -1,0 +1,50 @@
+{
+ "session_id": "bb6a4531-dbde-4d4e-953c-6237dd1e3245",
+ "status": "ready",
+ "problem": "Differentiate y = \\sin(x^{2})",
+ "submission": {
+  "problem": "Differentiate y = \\sin(x^{2})",
+  "steps": [
+   "\\frac{dy}{dx} = \\cos(x^{2})"
+  ],
+  "prose": null,
+  "source": "typed",
+  "transcription_confidence": null,
+  "student_corrected": true,
+  "unreadable": []
+ },
+ "explaining": false,
+ "diagnosis": {
+  "correct_solution": [
+   "Let u = x^2, so y = sin(u).",
+   "dy/du = cos(u).",
+   "du/dx = 2x.",
+   "By chain rule, dy/dx = dy/du * du/dx = cos(u) * 2x = 2x cos(x^2)."
+  ],
+  "sympy_check": {
+   "kind": "equivalence",
+   "lhs": "diff(sin(x**2), x)",
+   "rhs": "2*x*cos(x**2)",
+   "equation": null,
+   "variable": null,
+   "candidates": [],
+   "skip_reason": null
+  },
+  "verified_by_sympy": true,
+  "no_error_found": false,
+  "divergence_index": 0,
+  "buggy_rule": "d/dx sin(f(x)) = cos(f(x)) (missing chain rule factor f'(x))",
+  "misconception_statement": "You took the derivative of sine correctly but forgot to multiply by the derivative of the inside function, x\u00b2, which is 2x.",
+  "evidence": [
+   "The student wrote dy/dx = cos(x^2) instead of 2x cos(x^2)."
+  ],
+  "confidence": 0.95,
+  "competing_hypotheses": [
+   "The student may treat sin(x^2) as if it were just sin(x), ignoring the composition entirely."
+  ],
+  "is_unclear": false,
+  "clarifying_question": null,
+  "topic": "calculus.chain_rule",
+  "misconception_id": 19
+ }
+}

@@ -1,0 +1,16 @@
+{
+ "messages": [
+  {
+   "role": "user",
+   "content": "Show me the part with actual numbers",
+   "cited_beats": []
+  },
+  {
+   "role": "assistant",
+   "content": "The beat [beat:b4] uses actual numbers: plugging `a=1` and `b=3` into `(a+b)^2` gives `16`, but your answer `1^2 + 3^2 = 10` is off by `6`. That missing `6` is the middle term `2ab`. Click [beat:b4] to see the gap.",
+   "cited_beats": [
+    "b4"
+   ]
+  }
+ ]
+}

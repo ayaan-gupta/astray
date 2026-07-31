@@ -1,0 +1,46 @@
+{
+ "beats": [
+  {
+   "id": "b1",
+   "title": "The Problem x\u00b2 = 16",
+   "purpose": "Present the equation to solve and set up number line.",
+   "targets_misconception": false,
+   "start_s": 0.0,
+   "end_s": 7.533333333333334
+  },
+  {
+   "id": "b2",
+   "title": "Apply Buggy Rule x = \u221aa",
+   "purpose": "Show the student's incorrect step leading to only positive solution.",
+   "targets_misconception": false,
+   "start_s": 7.533333333333334,
+   "end_s": 18.06666666666665
+  },
+  {
+   "id": "b3",
+   "title": "Missing Negative Solution",
+   "purpose": "Reveal that -4 also works, targeting the misconception.",
+   "targets_misconception": true,
+   "start_s": 18.06666666666665,
+   "end_s": 23.86666666666664
+  },
+  {
+   "id": "b4",
+   "title": "Verification",
+   "purpose": "Show that plugging both values satisfies the equation.",
+   "targets_misconception": false,
+   "start_s": 23.86666666666664,
+   "end_s": 28.86666666666663
+  },
+  {
+   "id": "b5",
+   "title": "Key Identity",
+   "purpose": "State the correct rule: x = \u00b1\u221aa.",
+   "targets_misconception": false,
+   "start_s": 28.86666666666663,
+   "end_s": 38.26666666666679
+  }
+ ],
+ "video_url": "demo/5901c1da-fe6b-4e55-a4f6-31bd5834cb38/video.mp4",
+ "render_mode": "generated"
+}

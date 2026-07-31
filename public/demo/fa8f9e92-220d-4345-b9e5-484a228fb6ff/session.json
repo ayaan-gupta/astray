@@ -1,0 +1,48 @@
+{
+ "session_id": "fa8f9e92-220d-4345-b9e5-484a228fb6ff",
+ "status": "ready",
+ "problem": "Expand (y + 3)^{2}",
+ "submission": {
+  "problem": "Expand (y + 3)^{2}",
+  "steps": [
+   "(y + 3)^{2} = y^{2} + 9"
+  ],
+  "prose": null,
+  "source": "typed",
+  "transcription_confidence": null,
+  "student_corrected": true,
+  "unreadable": []
+ },
+ "explaining": false,
+ "diagnosis": {
+  "correct_solution": [
+   "(y+3)^2 = (y+3)(y+3)",
+   "= y*y + y*3 + 3*y + 3*3",
+   "= y^2 + 3y + 3y + 9",
+   "= y^2 + 6y + 9"
+  ],
+  "sympy_check": {
+   "kind": "equivalence",
+   "lhs": "(y+3)**2",
+   "rhs": "y**2 + 6*y + 9",
+   "equation": null,
+   "variable": null,
+   "candidates": [],
+   "skip_reason": null
+  },
+  "verified_by_sympy": true,
+  "no_error_found": false,
+  "divergence_index": 0,
+  "buggy_rule": "(a+b)^2 -> a^2 + b^2",
+  "misconception_statement": "You squared each term separately, but when you square a binomial you also need to include the middle term, which is twice the product of the two terms.",
+  "evidence": [
+   "Student wrote (y+3)^2 = y^2 + 9, which squares each term but omits the 2*y*3 = 6y term."
+  ],
+  "confidence": 0.95,
+  "competing_hypotheses": [],
+  "is_unclear": false,
+  "clarifying_question": null,
+  "topic": "algebra.binomial_expansion",
+  "misconception_id": 1
+ }
+}
